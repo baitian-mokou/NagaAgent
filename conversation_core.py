@@ -60,7 +60,7 @@ logger = logging.getLogger("NagaConversation")
 # _MCP_HANDOFF_REGISTERED=False  # 已移除，不再需要
 _TREE_THINKING_SUBSYSTEMS_INITIALIZED=False
 _MCP_SERVICES_INITIALIZED=False
-_QUICK_MODEL_MANAGER_INITIALIZED=False
+
 _VOICE_ENABLED_LOGGED=False
 
 class NagaConversation: # 对话主类
@@ -115,27 +115,7 @@ class NagaConversation: # 对话主类
                 logger.warning(f"树状思考系统实例创建失败: {e}")
                 self.tree_thinking = None
         
-        # 初始化快速模型管理器（用于异步思考判断）
-        self.quick_model_manager = None
-        # 集成快速模型管理器（参考树状思考的全局变量保护机制）
-        global _QUICK_MODEL_MANAGER_INITIALIZED
-        if not _QUICK_MODEL_MANAGER_INITIALIZED:
-            try:
-                from thinking.quick_model_manager import QuickModelManager
-                self.quick_model_manager = QuickModelManager()
-                logger.info("快速模型管理器初始化成功")
-                _QUICK_MODEL_MANAGER_INITIALIZED = True
-            except Exception as e:
-                logger.debug(f"快速模型管理器初始化失败: {e}")
-                self.quick_model_manager = None
-        else:
-            # 如果已经初始化过，创建新实例但不重新初始化（静默处理）
-            try:
-                from thinking.quick_model_manager import QuickModelManager
-                self.quick_model_manager = QuickModelManager()
-            except Exception as e:
-                logger.debug(f"快速模型管理器实例创建失败: {e}")
-                self.quick_model_manager = None
+
 
     def _init_mcp_services(self):
         """初始化MCP服务系统（只在首次初始化时输出日志，后续静默）"""
@@ -396,18 +376,25 @@ class NagaConversation: # 对话主类
                 import asyncio
                 thinking_task = asyncio.create_task(self._async_thinking_judgment(u))
             
-            # 普通模式：走工具调用循环（不等待思考树判断）
+            # 普通模式：走工具调用循环（根据配置决定是否流式）
             try:
-                result = await tool_call_loop(msgs, self.mcp, self._call_llm, is_streaming=True)
+                # 根据配置决定是否使用流式处理
+                is_streaming = config.system.stream_mode
+                result = await tool_call_loop(msgs, self.mcp, self._call_llm, is_streaming=is_streaming)
                 final_content = result['content']
                 recursion_depth = result['recursion_depth']
                 
                 if recursion_depth > 0:
                     print(f"工具调用循环完成，共执行 {recursion_depth} 轮")
                 
-                # 流式输出最终结果
-                for line in final_content.splitlines():
-                    yield ("娜迦", line)
+                # 根据配置决定输出方式
+                if is_streaming:
+                    # 流式输出最终结果
+                    for line in final_content.splitlines():
+                        yield ("娜迦", line)
+                else:
+                    # 非流式输出完整结果
+                    yield ("娜迦", final_content)
                 
                 # 保存对话历史
                 self.messages += [{"role": "user", "content": u}, {"role": "assistant", "content": final_content}]
