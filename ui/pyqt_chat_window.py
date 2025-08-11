@@ -766,17 +766,15 @@ class ChatWindow(QWidget):
         print(f"设置变化: {setting_key} = {value}")
         
         # 这里可以实时应用某些设置变化
-        if setting_key == "STREAM_MODE":
-            s.streaming_mode = value
-            s.add_user_message("系统", f"● 流式模式已{'启用' if value else '禁用'}")
-        elif setting_key == "BG_ALPHA":
-            # 实时更新背景透明度
-            global BG_ALPHA
-            BG_ALPHA = value / 100.0
-            # 这里可以添加实时更新UI的代码
-        elif setting_key == "VOICE_ENABLED":
+        if setting_key in ("all", "ui.bg_alpha", "ui.window_bg_alpha"):  # UI透明度变化 #
+            s.apply_opacity_from_config()  # 立即应用 #
+            return
+        if setting_key in ("system.stream_mode", "STREAM_MODE"):
+            s.streaming_mode = value if setting_key == "system.stream_mode" else value  # 兼容新旧键名 #
+            s.add_user_message("系统", f"● 流式模式已{'启用' if s.streaming_mode else '禁用'}")
+        elif setting_key in ("system.voice_enabled", "VOICE_ENABLED"):
             s.add_user_message("系统", f"● 语音功能已{'启用' if value else '禁用'}")
-        elif setting_key == "DEBUG":
+        elif setting_key in ("system.debug", "DEBUG"):
             s.add_user_message("系统", f"● 调试模式已{'启用' if value else '禁用'}")
         
         # 发送设置变化信号给其他组件
@@ -815,6 +813,51 @@ class ChatWindow(QWidget):
         s.update()
         
         print(f"✅ 窗口背景透明度已设置为: {WINDOW_BG_ALPHA}/255 ({WINDOW_BG_ALPHA/255*100:.1f}%不透明度)")
+
+    def apply_opacity_from_config(s):
+        """从配置中应用UI透明度(聊天区/输入框/侧栏/窗口)"""
+        # 更新全局变量，保持其它逻辑一致 #
+        global BG_ALPHA, WINDOW_BG_ALPHA
+        BG_ALPHA = config.ui.bg_alpha
+        WINDOW_BG_ALPHA = config.ui.window_bg_alpha if isinstance(config.ui.window_bg_alpha, int) else int(config.ui.window_bg_alpha * 255)
+
+        # 计算alpha #
+        alpha_px = int(BG_ALPHA * 255)
+
+        # 更新聊天历史背景 #
+        s.text.setStyleSheet(f"""
+            QTextEdit {{
+                background: rgba(17,17,17,{alpha_px});
+                color: #fff;
+                border-radius: 15px;
+                border: 1px solid rgba(255, 255, 255, 50);
+                font: 16pt 'Lucida Console';
+                padding: 10px;
+            }}
+        """)
+
+        # 更新输入框背景 #
+        fontfam, fontsize = 'Lucida Console', 16
+        s.input.setStyleSheet(f"""
+            QTextEdit {{
+                background: rgba(17,17,17,{alpha_px});
+                color: #fff;
+                border-radius: 15px;
+                border: 1px solid rgba(255, 255, 255, 50);
+                font: {fontsize}pt '{fontfam}';
+                padding: 8px;
+            }}
+        """)
+
+        # 更新侧栏背景 #
+        if hasattr(s, 'side') and isinstance(s.side, QWidget):
+            try:
+                s.side.set_background_alpha(alpha_px)
+            except Exception:
+                pass
+
+        # 更新主窗口背景 #
+        s.set_window_background_alpha(WINDOW_BG_ALPHA)
 
     def showEvent(s, event):
         """窗口显示事件"""

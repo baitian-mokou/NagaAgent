@@ -1,10 +1,11 @@
 {
   "system": {
     "version": "3.0",
-    "voice_enabled": true,
-    "stream_mode": true,
+    "voice_enabled": false,
+    "stream_mode": false,
     "debug": true,
-    "log_level": "DEBUG"
+    "log_level": "DEBUG",
+    "save_prompts": true
   },
   "api": {
     "api_key": " ",
@@ -28,8 +29,11 @@
     "similarity_threshold": 0.6,
     "neo4j_uri": "neo4j://127.0.0.1:7687",
     "neo4j_user": "neo4j",
-    "neo4j_password": " ",
-    "neo4j_database": "neo4j"
+    "neo4j_password": "Xx2017105",
+    "neo4j_database": "neo4j",
+    "extraction_timeout": 12,
+    "extraction_retries": 2,
+    "base_timeout": 15
   },
   "handoff": {
     "max_loop_stream": 5,
@@ -56,37 +60,32 @@
     "minimax_emotion": "neutral",
     "keep_audio_files": false
   },
-  "quick_model": {
-    "enabled": true,
-    "api_key": " ",
-    "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-    "model_name": "doubao-seed-1-6-flash-250615",
-    "max_tokens": 512,
-    "temperature": 0.05,
-    "timeout": 5,
-    "max_retries": 2
-  },
   "weather": {
     "api_key": " "
   },
   "mqtt": {
     "enabled": true,
-    "broker": " ",
-    "port": 1883,
+    "broker": "iot-06z00b3k4pfqzty.mqtt.iothub.aliyuncs.com",
+    "port": 1878,
     "topic": " ",
-    "client_id": " ",
-    "username": "E6UtPoMxRw7iDKzQuBVE&k28x9wMnNss",
+    "client_id": "k28x9wMnNss.E6UtPoMxRw7iDKzQuBVE|securemode=2,signmethod=hmacsha256,timestamp=1753506912322|",
+    "username": " ",
     "password": "6d43c5dd91a0f19517bd72161de90ba09f568db8b2655fa9a2bf714f046adb1d",
     "keepalive": 60,
     "qos": 1
   },
   "ui": {
     "user_name": "用户",
-    "bg_alpha": 0.5,
-    "window_bg_alpha": 110,
+    "bg_alpha": 0.59,
+    "window_bg_alpha": 128,
     "mac_btn_size": 36,
     "mac_btn_margin": 16,
     "mac_btn_gap": 12,
     "animation_duration": 600
+  },
+  "naga_portal": {
+    "portal_url": "https://naga.furina.chat/",
+    "username": " ",
+    "password": " "
   }
 }
