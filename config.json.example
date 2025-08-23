@@ -98,5 +98,13 @@
     "portal_url": "https://naga.furina.chat/",  // 娜迦官网地址
     "username": "your-username",                // 娜迦官网用户名
     "password": "your-password"                 // 娜迦官网密码
+  },
+  // crawl4ai插件配置
+  "crawl4ai": {
+    "headless": true,
+    "timeout": 30000,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "viewport_width": 1280,
+    "viewport_height": 720
   }
 }
