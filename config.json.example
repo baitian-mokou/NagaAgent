@@ -83,9 +83,9 @@
     "password": " "
   },
   "online_search": {
-    "Bocha_API_KEY": "-",
-    "Bocha_Url": "https://api.bochaai.com/v1/web-search",
-    "Bocha_count": 5
+    "searxng_url": "https://searxng.pylindex.top",
+    "engines": ["google"],
+    "num_results": 5
   },
   "invalid": "config"
 }
