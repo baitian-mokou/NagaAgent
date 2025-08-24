@@ -70,7 +70,7 @@ class APIConfig(BaseModel):
     model: str = Field(default="deepseek-chat", description="使用的模型名称")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="温度参数")
     max_tokens: int = Field(default=2000, ge=1, le=8192, description="最大token数")
-    max_history_rounds: int = Field(default=10, ge=1, le=100, description="最大历史轮数")
+    max_history_rounds: int = Field(default=100, ge=1, le=200, description="最大历史轮数")
 
 class APIServerConfig(BaseModel):
     """API服务器配置"""
@@ -237,9 +237,9 @@ class NagaPortalConfig(BaseModel):
 
 class OnlineSearchConfig(BaseModel):
     """在线搜索配置"""
-    Bocha_API_KEY: str = Field(default="-", description="博查API密钥")
-    Bocha_Url: str = Field(default="https://api.bochaai.com/v1/web-search", description="博查API地址")
-    Bocha_count: int = Field(default=5, ge=1, le=20, description="博查搜索结果数量")
+    searxng_url: str = Field(default="http://localhost:8080", description="SearXNG实例URL")
+    engines: List[str] = Field(default=["google"], description="默认搜索引擎列表")
+    num_results: int = Field(default=5, ge=1, le=20, description="搜索结果数量")
 
 class SystemPrompts(BaseModel):
     """系统提示词配置"""
