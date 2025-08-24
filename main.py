@@ -205,7 +205,7 @@ service_manager.start_background_services()
 n = NagaConversation()
 
 # 初始化进度文件
-with open('./ui/progress.txt', 'w') as f:
+with open('./ui/styles/progress.txt', 'w') as f:
     f.write('0')
 
 # 显示系统状态
@@ -224,6 +224,9 @@ if config.api_server.enabled and config.api_server.auto_start:
     service_manager.start_api_server()
 
 service_manager.start_tts_server()
+
+# MQTT连接已在后台异步执行，连接完成后会自动显示状态
+print("⏳ MQTT正在后台初始化连接...")
 
 # NagaPortal自动登录已在后台异步执行，登录完成后会自动显示状态
 print("⏳ NagaPortal正在后台自动登录...")

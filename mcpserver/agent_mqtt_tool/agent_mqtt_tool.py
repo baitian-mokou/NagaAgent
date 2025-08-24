@@ -1,4 +1,4 @@
-# agent_device_switch.py # 设备开关控制Agent，仅保留开关控制功能
+# agent_mqtt_tool.py # 设备开关控制Agent，仅保留开关控制功能
 import json
 from agents import Agent
 
@@ -10,7 +10,7 @@ except Exception as e:
 
 class AgentMqttTool(Agent):
     name = "agent_mqtt_tool"  # Agent名称
-    instructions = "设备开关控制MCP Agent，仅支持通过MQTT控制两个设备的开关状态"  # 角色描述
+    instructions = "设备开关控制MCP Agent，仅支持通过MQTT控制三个设备的开关状态"  # 角色描述
     def __init__(self):
         super().__init__(
             name=self.name,
@@ -21,24 +21,49 @@ class AgentMqttTool(Agent):
         print(f"✅ agent_mqtt_tool初始化完成")
 
     async def handle_handoff(self, data: dict) -> str:
-        """只处理switch_devices命令"""
+        """只处理设备启停控制命令"""
         try:
             tool_name = data.get("tool_name")
-            if tool_name != "switch_devices":
+            if tool_name != "设备启停控制":
                 return json.dumps({
-                    "status": "error",
-                    "message": "仅支持switch_devices操作",
+                    "success": False,
+                    "message": "仅支持设备启停控制操作",
                     "data": {}
                 }, ensure_ascii=False)
+            
+            # 获取设备参数
             device1 = data.get("device1")
             device2 = data.get("device2")
             device3 = data.get("device3")
+            
+            # 检查参数是否存在
             if device1 is None or device2 is None or device3 is None:
                 return json.dumps({
-                    "status": "error",
-                    "message": "switch_devices操作需要device1、device2和device3参数",
-                    "data": {}
+                    "success": False,
+                    "message": "设备启停控制操作需要device1、device2和device3参数",
+                    "data": {"received_data": data}
                 }, ensure_ascii=False)
+            
+            # 验证参数类型和范围
+            try:
+                device1 = int(device1)
+                device2 = int(device2)
+                device3 = int(device3)
+            except (ValueError, TypeError):
+                return json.dumps({
+                    "success": False,
+                    "message": "设备状态必须是整数（0或1）",
+                    "data": {"received_data": data}
+                }, ensure_ascii=False)
+            
+            # 验证参数范围
+            if device1 not in [0, 1] or device2 not in [0, 1] or device3 not in [0, 1]:
+                return json.dumps({
+                    "success": False,
+                    "message": "设备状态必须是0（关闭）或1（开启）",
+                    "data": {"device1": device1, "device2": device2, "device3": device3}
+                }, ensure_ascii=False)
+            
             # 调用设备开关工具
             success, message = device_manager.switch_devices(device1, device2, device3)
             result = {
@@ -53,11 +78,11 @@ class AgentMqttTool(Agent):
             return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return json.dumps({
-                "status": "error",
+                "success": False,
                 "message": f"设备控制异常: {str(e)}",
                 "data": {}
             }, ensure_ascii=False)
 
-def create_device_switch_agent():
+def create_mqtt_tool_agent():
     """创建agent_mqtt_tool实例"""
     return AgentMqttTool() 

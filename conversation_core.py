@@ -14,7 +14,7 @@ from typing import List, Dict
 from openai import OpenAI, AsyncOpenAI
 
 # 本地模块导入
-from apiserver.tool_call_utils import parse_tool_calls, execute_tool_calls, tool_call_loop
+from apiserver.tool_call_utils import tool_call_loop
 from config import config
 from mcpserver.mcp_manager import get_mcp_manager
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
@@ -137,6 +137,9 @@ class NagaConversation: # 对话主类
             
             # 异步启动NagaPortal自动登录
             self._start_naga_portal_auto_login()
+            
+            # 异步启动MQTT连接状态检查
+            self._start_mqtt_status_check()
         except Exception as e:
             logger.error(f"MCP服务系统初始化失败: {e}")
     
@@ -230,6 +233,50 @@ class NagaConversation: # 对话主类
         except Exception as e:
             print(f"🍪 NagaPortal状态获取失败: {e}")
     
+    def _start_mqtt_status_check(self):
+        """启动MQTT连接并显示状态（异步）"""
+        try:
+            # 检查是否配置了MQTT
+            if not config.mqtt.enabled:
+                return  # 静默跳过，不输出日志
+            
+            # 在新线程中异步执行MQTT连接
+            def run_mqtt_connection():
+                try:
+                    import sys
+                    import os
+                    import time
+                    # 添加项目根目录到Python路径
+                    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    sys.path.insert(0, project_root)
+                    
+                    try:
+                        from mqtt_tool.device_switch import device_manager
+                        
+                        # 尝试连接MQTT
+                        if hasattr(device_manager, 'connect'):
+                            success = device_manager.connect()
+                            if success:
+                                print("🔗 MQTT连接状态: 已连接")
+                            else:
+                                print("⚠️ MQTT连接状态: 连接失败（将在使用时重试）")
+                        else:
+                            print("❌ MQTT功能不可用")
+                            
+                    except Exception as e:
+                        print(f"⚠️ MQTT连接失败: {e}")
+                        
+                except Exception as e:
+                    print(f"❌ MQTT连接异常: {e}")
+            
+            # 启动后台线程
+            import threading
+            mqtt_thread = threading.Thread(target=run_mqtt_connection, daemon=True)
+            mqtt_thread.start()
+            
+        except Exception as e:
+            print(f"❌ MQTT连接启动失败: {e}")
+    
     def save_log(self, u, a):  # 保存对话日志
         if self.dev_mode:
             return  # 开发者模式不写日志
@@ -261,18 +308,28 @@ class NagaConversation: # 对话主类
         if len(self.messages) > max_messages:
             self.messages = self.messages[-max_messages:]
 
-    async def _call_llm(self, messages: List[Dict]) -> Dict:
-        """调用LLM API"""
+    async def _call_llm(self, messages: List[Dict], use_stream: bool = None) -> Dict:
+        """调用LLM API - 统一使用流式处理"""
         try:
             resp = await self.async_client.chat.completions.create(
                 model=config.api.model, 
                 messages=messages, 
                 temperature=config.api.temperature, 
                 max_tokens=config.api.max_tokens, 
-                stream=False  # 工具调用循环中不使用流式
+                stream=True  # 统一使用流式
             )
+            
+            # 流式响应处理
+            content = ""
+            async for chunk in resp:
+                # 安全检查：确保chunk.choices不为空且有内容
+                if (chunk.choices and 
+                    len(chunk.choices) > 0 and 
+                    hasattr(chunk.choices[0], 'delta') and 
+                    chunk.choices[0].delta.content):
+                    content += chunk.choices[0].delta.content
             return {
-                'content': resp.choices[0].message.content,
+                'content': content,
                 'status': 'success'
             }
         except RuntimeError as e:
@@ -285,10 +342,20 @@ class NagaConversation: # 对话主类
                     messages=messages, 
                     temperature=config.api.temperature, 
                     max_tokens=config.api.max_tokens, 
-                    stream=False
+                    stream=True
                 )
+                
+                # 流式响应处理
+                content = ""
+                async for chunk in resp:
+                    # 安全检查：确保chunk.choices不为空且有内容
+                    if (chunk.choices and 
+                        len(chunk.choices) > 0 and 
+                        hasattr(chunk.choices[0], 'delta') and 
+                        chunk.choices[0].delta.content):
+                        content += chunk.choices[0].delta.content
                 return {
-                    'content': resp.choices[0].message.content,
+                    'content': content,
                     'status': 'success'
                 }
             else:
@@ -300,13 +367,13 @@ class NagaConversation: # 对话主类
                 'status': 'error'
             }
 
-    # 工具调用循环相关方法
-    def handle_llm_response(self, a, mcp):
-        # 只保留普通文本流式输出逻辑 #
-        async def text_stream():
-            for line in a.splitlines():
-                yield ("娜迦", line)
-        return text_stream()
+    # 工具调用循环相关方法 - 已废弃，使用流式工具调用提取器替代
+    # def handle_llm_response(self, a, mcp):
+    #     # 只保留普通文本流式输出逻辑 #
+    #     async def text_stream():
+    #         for line in a.splitlines():
+    #             yield ("娜迦", line)
+    #     return text_stream()
 
     def _format_services_for_prompt(self, available_services: dict) -> str:
         """格式化可用服务列表为prompt字符串，MCP服务和Agent服务分开，包含具体调用格式"""
@@ -463,34 +530,155 @@ class NagaConversation: # 对话主类
             #     import asyncio
             #     thinking_task = asyncio.create_task(self._async_thinking_judgment(u))
             
-            # 普通模式：走工具调用循环（根据配置决定是否流式）
+            # 流式处理：实时检测工具调用，使用统一的工具调用循环
             try:
-                # 根据配置决定是否使用流式处理
-                is_streaming = config.system.stream_mode
-                result = await tool_call_loop(msgs, self.mcp, self._call_llm, is_streaming=is_streaming)
-                final_content = result['content']
-                recursion_depth = result['recursion_depth']
+                # 导入流式工具调用提取器
+                from apiserver.streaming_tool_extractor import StreamingToolCallExtractor
+                import queue
                 
-                if recursion_depth > 0:
-                    print(f"工具调用循环完成，共执行 {recursion_depth} 轮")
+                # 创建工具调用队列
+                tool_calls_queue = queue.Queue()
+                tool_extractor = StreamingToolCallExtractor(self.mcp)
                 
-                # 根据配置决定输出方式
-                if is_streaming:
-                    # 流式输出最终结果
-                    for line in final_content.splitlines():
-                        yield ("娜迦", line)
-                else:
-                    # 非流式输出完整结果
-                    yield ("娜迦", final_content)
+                # 用于累积前端显示的纯文本（不包含工具调用）
+                display_text = ""
                 
-                # 保存对话历史
-                self.messages += [{"role": "user", "content": u}, {"role": "assistant", "content": final_content}]
-                self.save_log(u, final_content)
+                # 设置回调函数
+                def on_text_chunk(text: str, chunk_type: str):
+                    """处理文本块 - 发送到前端显示"""
+                    if chunk_type == "chunk":
+                        nonlocal display_text
+                        display_text += text
+                        return ("娜迦", text)
+                    return None
                 
-                # GRAG记忆存储（开发者模式不写入）
+                def on_sentence(sentence: str, sentence_type: str):
+                    """处理完整句子"""
+                    if sentence_type == "sentence":
+                        print(f"完成句子: {sentence}")
+                    return None
+                
+                def on_tool_result(result: str, result_type: str):
+                    """处理工具结果 - 不发送到前端"""
+                    if result_type == "tool_result":
+                        print(f"✅ 工具执行完成: {result[:100]}...")
+                    elif result_type == "tool_error":
+                        print(f"❌ 工具执行错误: {result}")
+                    return None
+                
+                # 设置回调
+                tool_extractor.set_callbacks(
+                    on_text_chunk=on_text_chunk,
+                    on_sentence=on_sentence,
+                    on_tool_result=on_tool_result,
+                    tool_calls_queue=tool_calls_queue
+                )
+                
+                # 调用LLM API - 流式模式
+                resp = await self.async_client.chat.completions.create(
+                    model=config.api.model,
+                    messages=msgs,
+                    temperature=config.api.temperature,
+                    max_tokens=config.api.max_tokens,
+                    stream=True
+                )
+                
+                # 处理流式响应
+                async for chunk in resp:
+                    # 安全检查：确保chunk.choices不为空且有内容
+                    if (chunk.choices and 
+                        len(chunk.choices) > 0 and 
+                        hasattr(chunk.choices[0], 'delta') and 
+                        chunk.choices[0].delta.content):
+                        content = chunk.choices[0].delta.content
+                        # 使用流式工具调用提取器处理内容
+                        results = await tool_extractor.process_text_chunk(content)
+                        if results:
+                            for result in results:
+                                if isinstance(result, tuple) and len(result) == 2:
+                                    yield result
+                                elif isinstance(result, str):
+                                    yield ("娜迦", result)
+                
+                # 完成处理
+                final_results = await tool_extractor.finish_processing()
+                if final_results:
+                    for result in final_results:
+                        if isinstance(result, tuple) and len(result) == 2:
+                            yield result
+                        elif isinstance(result, str):
+                            yield ("娜迦", result)
+                
+                # 检查是否有工具调用需要处理
+                if not tool_calls_queue.empty():
+                    # 使用统一的工具调用循环处理
+                    async def llm_caller(messages, use_stream=False):
+                        """LLM调用函数，用于工具调用循环"""
+                        # 这里不需要实际调用LLM，因为工具调用已经提取完成
+                        return {'content': '', 'status': 'success'}
+                    
+                    # 使用工具调用循环处理工具调用
+                    result = await tool_call_loop(msgs, self.mcp, llm_caller, is_streaming=True, tool_calls_queue=tool_calls_queue)
+                    
+                    if result.get('has_tool_results'):
+                        # 有工具执行结果，让LLM继续处理
+                        tool_results = result['content']
+                        
+                        # 构建包含工具结果的消息
+                        tool_messages = self.messages.copy()
+                        tool_messages.append({"role": "user", "content": f"工具执行结果：{tool_results}"})
+                        
+                        # 调用LLM继续处理工具结果
+                        try:
+                            resp2 = await self.async_client.chat.completions.create(
+                                model=config.api.model,
+                                messages=tool_messages,
+                                temperature=config.api.temperature,
+                                max_tokens=config.api.max_tokens,
+                                stream=True
+                            )
+                            
+                            # 处理LLM的继续响应 - 也需要通过流式工具调用提取器处理
+                            async for chunk in resp2:
+                                # 安全检查：确保chunk.choices不为空且有内容
+                                if (chunk.choices and 
+                                    len(chunk.choices) > 0 and 
+                                    hasattr(chunk.choices[0], 'delta') and 
+                                    chunk.choices[0].delta.content):
+                                    content = chunk.choices[0].delta.content
+                                    # 使用流式工具调用提取器处理内容
+                                    results = await tool_extractor.process_text_chunk(content)
+                                    if results:
+                                        for result in results:
+                                            if isinstance(result, tuple) and len(result) == 2:
+                                                yield result
+                                            elif isinstance(result, str):
+                                                yield ("娜迦", result)
+                                    
+                                    # 注意：文本内容通过 on_text_chunk 回调函数已经累积到 display_text 中
+                        except Exception as e:
+                            print(f"LLM继续处理工具结果失败: {e}")
+                
+                # 完成所有处理，获取最终的纯文本内容
+                final_results = await tool_extractor.finish_processing()
+                if final_results:
+                    for result in final_results:
+                        if isinstance(result, tuple) and len(result) == 2:
+                            yield result
+                        elif isinstance(result, str):
+                            yield ("娜迦", result)
+                
+                # 保存对话历史（使用前端显示的纯文本）
+                print(f"[DEBUG] 最终display_text长度: {len(display_text)}")
+                print(f"[DEBUG] 最终display_text内容: {display_text[:200]}...")
+                self.messages += [{"role": "user", "content": u}, {"role": "assistant", "content": display_text}]
+                self.save_log(u, display_text)
+                
+                # GRAG记忆存储（开发者模式不写入）- 使用前端显示的纯文本
                 if self.memory_manager and not self.dev_mode:
                     try:
-                        await self.memory_manager.add_conversation_memory(u, final_content)
+                        # 使用前端显示的纯文本进行五元组提取
+                        await self.memory_manager.add_conversation_memory(u, display_text)
                     except Exception as e:
                         logger.error(f"GRAG记忆存储失败: {e}")
                 

@@ -595,13 +595,7 @@ class ElegantSettingsWidget(QWidget):
             tts_port_card = SettingCard("TTS端口", "TTS服务端口", tts_port_spin, "tts.port")
             tts_port_card.value_changed.connect(self.on_setting_changed)
             group.add_card(tts_port_card)
-        if hasattr(config.tts, "keep_audio_files"):
-            keep_audio_checkbox = QCheckBox()
-            keep_audio_checkbox.setChecked(config.tts.keep_audio_files)
-            keep_audio_checkbox.setStyleSheet(self.get_checkbox_style() + "color: #fff;")
-            keep_audio_card = SettingCard("保留音频文件", "保留TTS生成的音频文件用于调试", keep_audio_checkbox, "tts.keep_audio_files")
-            keep_audio_card.value_changed.connect(self.on_setting_changed)
-            group.add_card(keep_audio_checkbox)
+
         parent_layout.addWidget(group)
 
     def create_weather_group(self, parent_layout):
@@ -838,8 +832,13 @@ class ElegantSettingsWidget(QWidget):
     def load_current_settings(self):
         """加载当前设置"""
         try:
-            # API设置
-            self.api_key_input.setText(config.api.api_key if config.api.api_key != "sk-placeholder-key-not-set" else "")
+            # API设置 - 优先从.env文件读取API密钥
+            env_api_key = self.read_api_key_from_env()
+            if env_api_key:
+                self.api_key_input.setText(env_api_key)
+            else:
+                self.api_key_input.setText(config.api.api_key if config.api.api_key != "sk-placeholder-key-not-set" else "")
+            
             self.base_url_input.setText(config.api.base_url)
             
             index = self.model_combo.findText(config.api.model)
@@ -860,6 +859,35 @@ class ElegantSettingsWidget(QWidget):
             
         except Exception as e:
             print(f"加载设置失败: {e}")
+    
+    def read_api_key_from_env(self):
+        """从.env文件读取API密钥"""
+        env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip().startswith('API_KEY'):
+                        return line.strip().split('=', 1)[-1].strip()
+        return ""
+    
+    def write_api_key_to_env(self, new_key):
+        """将API密钥写入.env文件"""
+        env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+        env_lines = []
+        found = False
+        
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                env_lines = f.readlines()
+            for i, line in enumerate(env_lines):
+                if line.strip().startswith('API_KEY'):
+                    env_lines[i] = f'API_KEY={new_key}\n'
+                    found = True
+                    break
+        if not found:
+            env_lines.append(f'API_KEY={new_key}\n')
+        with open(env_path, 'w', encoding='utf-8') as f:
+            f.writelines(env_lines)
             
     def save_settings(self):
         """保存所有设置到config.json"""
@@ -884,6 +912,11 @@ class ElegantSettingsWidget(QWidget):
             # 更新配置数据
             for setting_key, value in self.pending_changes.items():
                 try:
+                    # 特殊处理API密钥
+                    if setting_key == 'api.api_key':
+                        # 同时写入.env文件和config.json
+                        self.write_api_key_to_env(value)
+                    
                     # 解析嵌套的配置键 (例如 "api.api_key")
                     keys = setting_key.split('.')
                     current = config_data
@@ -911,10 +944,14 @@ class ElegantSettingsWidget(QWidget):
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config_data, f, ensure_ascii=False, indent=2)
             
-            # 动态更新config对象
-            from config import load_config
-            global config
-            config = load_config()
+            # 使用配置管理器进行热更新
+            from config_manager import update_config
+            # 将扁平化的配置键值对转换为嵌套字典格式
+            nested_updates = self._convert_to_nested_updates(self.pending_changes)
+            success = update_config(nested_updates)
+            if not success:
+                self.update_status_label("✗ 配置更新失败")
+                return
                     
             self.update_status_label(f"✓ 已保存 {success_count}/{changes_count} 项设置")
             self.pending_changes.clear()
@@ -933,6 +970,31 @@ class ElegantSettingsWidget(QWidget):
             webbrowser.open("https://naga.furina.chat/")
         except Exception as e:
             print(f"打开娜迦API网站失败: {e}")
+    
+    def _convert_to_nested_updates(self, flat_updates: dict) -> dict:
+        """将扁平化的配置键值对转换为嵌套字典格式"""
+        nested_updates = {}
+        
+        for setting_key, value in flat_updates.items():
+            # 解析嵌套的配置键 (例如 "api.api_key")
+            keys = setting_key.split('.')
+            current = nested_updates
+            
+            # 导航到父级
+            for key in keys[:-1]:
+                if key not in current:
+                    current[key] = {}
+                current = current[key]
+            
+            # 设置值，处理特殊转换
+            final_key = keys[-1]
+            if setting_key in ['api.temperature', 'grag.similarity_threshold', 'ui.bg_alpha']:
+                # 温度、相似度、透明度值从0-100转换为0.0-1.0
+                current[final_key] = value / 100.0
+            else:
+                current[final_key] = value
+        
+        return nested_updates
     
     def reset_settings(self):
         """重置所有设置"""
