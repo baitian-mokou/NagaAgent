@@ -26,6 +26,7 @@ class Crawl4aiAgent:
         self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         self.viewport_width = 1280
         self.viewport_height = 720
+        self.max_chars = 4096  # 默认获取前4096个字符
         
         # 从配置中读取设置
         self._load_config()
@@ -48,6 +49,8 @@ class Crawl4aiAgent:
                     self.viewport_width = int(crawl4ai_config.viewport_width)
                 if hasattr(crawl4ai_config, 'viewport_height'):
                     self.viewport_height = int(crawl4ai_config.viewport_height)
+                if hasattr(crawl4ai_config, 'max_chars'):
+                    self.max_chars = int(crawl4ai_config.max_chars)
         except Exception as e:
             print(f"[WARN] 从全局配置读取Crawl4AI配置时出错: {e}")
             
@@ -69,12 +72,14 @@ class Crawl4aiAgent:
                         self.viewport_width = int(crawl4ai_config['viewport_width'])
                     if 'viewport_height' in crawl4ai_config:
                         self.viewport_height = int(crawl4ai_config['viewport_height'])
+                    if 'max_chars' in crawl4ai_config:
+                        self.max_chars = int(crawl4ai_config['max_chars'])
         except Exception as e:
             print(f"[WARN] 从config.json文件读取Crawl4AI配置时出错: {e}")
     
     async def crawl_page(self, url: str, css_selector: Optional[str] = None, 
                        wait_for: Optional[str] = None, javascript_enabled: bool = True,
-                       screenshot: bool = False) -> Dict[str, Any]:
+                       screenshot: bool = False, max_chars: Optional[int] = None) -> Dict[str, Any]:
         """使用Crawl4AI解析网页"""
         if not CRAWL4AI_AVAILABLE:
             return {
@@ -83,6 +88,9 @@ class Crawl4aiAgent:
             }
         
         try:
+            # 使用传入的max_chars或默认值
+            char_limit = max_chars if max_chars is not None else self.max_chars
+            
             # 创建浏览器配置
             browser_config = BrowserConfig(
                 headless=self.headless,
@@ -118,6 +126,10 @@ class Crawl4aiAgent:
                     
                     # 格式化Markdown内容
                     markdown_content = self._format_markdown(result)
+                    
+                    # 限制字符数
+                    if char_limit > 0 and len(markdown_content) > char_limit:
+                        markdown_content = markdown_content[:char_limit] + "\n\n...（内容已截断，仅显示前" + str(char_limit) + "个字符）"
                     
                     return {
                         "success": True,
@@ -213,6 +225,7 @@ class Crawl4aiAgent:
                 wait_for = data.get("wait_for")
                 javascript_enabled = data.get("javascript_enabled", True)
                 screenshot = data.get("screenshot", False)
+                max_chars = data.get("max_chars")
                 
                 # 执行解析
                 crawl_result = await self.crawl_page(
@@ -220,7 +233,8 @@ class Crawl4aiAgent:
                     css_selector=css_selector,
                     wait_for=wait_for,
                     javascript_enabled=javascript_enabled,
-                    screenshot=screenshot
+                    screenshot=screenshot,
+                    max_chars=max_chars
                 )
                 
                 if crawl_result["success"]:

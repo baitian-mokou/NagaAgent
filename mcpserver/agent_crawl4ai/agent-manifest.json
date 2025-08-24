@@ -22,8 +22,8 @@
     "invocationCommands": [
       {
         "command": "网页解析",
-        "description": "解析指定网页，返回Markdown格式内容；参数：url（网页地址，必需），css_selector（可选CSS选择器），wait_for（可选等待元素）",
-        "example": "{\"tool_name\":\"网页解析\",\"url\":\"https://example.com\"}"
+        "description": "解析指定网页，返回Markdown格式内容；参数：url（网页地址，必需），css_selector（可选CSS选择器），wait_for（可选等待元素），max_chars（获取前x个字符，默认4096）",
+        "example": "{\"tool_name\":\"网页解析\",\"url\":\"https://example.com\",\"max_chars\":4096}"
       }
     ]
   },
@@ -35,7 +35,8 @@
       "css_selector": {"type": "string", "description": "可选CSS选择器，用于提取特定内容"},
       "wait_for": {"type": "string", "description": "可选等待的元素选择器"},
       "javascript_enabled": {"type": "boolean", "description": "是否启用JavaScript执行，默认true"},
-      "screenshot": {"type": "boolean", "description": "是否生成截图，默认false"}
+      "screenshot": {"type": "boolean", "description": "是否生成截图，默认false"},
+      "max_chars": {"type": "integer", "description": "获取网页内容的前x个字符，默认4096"}
     },
     "required": ["tool_name", "url"]
   },
@@ -54,7 +55,8 @@
     "timeout": "number",
     "user_agent": "string",
     "viewport_width": "number",
-    "viewport_height": "number"
+    "viewport_height": "number",
+    "max_chars": "number"
   },
   "runtime": {
     "instance": null,
