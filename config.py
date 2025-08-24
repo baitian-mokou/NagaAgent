@@ -237,9 +237,9 @@ class NagaPortalConfig(BaseModel):
 
 class OnlineSearchConfig(BaseModel):
     """在线搜索配置"""
-    Bocha_API_KEY: str = Field(default="-", description="博查API密钥")
-    Bocha_Url: str = Field(default="https://api.bochaai.com/v1/web-search", description="博查API地址")
-    Bocha_count: int = Field(default=5, ge=1, le=20, description="博查搜索结果数量")
+    searxng_url: str = Field(default="http://localhost:8080", description="SearXNG实例URL")
+    engines: List[str] = Field(default=["google"], description="默认搜索引擎列表")
+    num_results: int = Field(default=5, ge=1, le=20, description="搜索结果数量")
 
 class SystemPrompts(BaseModel):
     """系统提示词配置"""
