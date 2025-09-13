@@ -10,14 +10,7 @@
 
 ---
 
-简易入门视频：[https://www.pylindex.top/naga/intro.mp4](https://www.pylindex.top/naga/intro.mp4)
-
-```html
-<video id="video" controls="" preload="none">
-      <source id="mp4" src="https://www.pylindex.top/naga/intro.mp4" type="video/mp4">
-</videos>
-```
-
+快速入门视频：[https://www.pylindex.top/naga/intro.mp4](https://www.pylindex.top/naga/intro.mp4)
 ---
 
 **🐍 智能对话助手 | 多平台支持 | 丰富生态 | 易于扩展**
