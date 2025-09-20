@@ -6,9 +6,11 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)
 ![Status](https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge)
 
-
 ![Star History](https://img.shields.io/github/stars/Xxiii8322766509/NagaAgent?style=social)![Forks](https://img.shields.io/github/forks/Xxiii8322766509/NagaAgent?style=social)![Issues](https://img.shields.io/github/issues/Xxiii8322766509/NagaAgent)![Pull Requests](https://img.shields.io/github/issues-pr/Xxiii8322766509/NagaAgent)
 
+---
+
+快速入门视频：[https://www.pylindex.top/naga/intro.mp4](https://www.pylindex.top/naga/intro.mp4)
 ---
 
 **🐍 智能对话助手 | 多平台支持 | 丰富生态 | 易于扩展**
@@ -23,6 +25,7 @@
 ✅ **🔧 丰富生态**: 支持多种 MCP 服务和 Agent 系统  
 ✅ **🎤 语音交互**: OpenAI 兼容的流式语音合成服务  
 ✅ **🖥️ 现代界面**: 基于 PyQt5 的独立对话框消息渲染系统  
+✅ **🎭 Live2D集成**: 独立的Live2D模块，支持模型和图片的混合侧栏显示  
 ✅ **🌐 完整 API**: FastAPI RESTful API 和流式输出  
 ✅ **📱 系统托盘**: 完整的后台运行和自启动支持  
 ✅ **🔍 智能代理**: 动态服务发现和热插拔管理  
@@ -31,6 +34,7 @@
 ✅ **🌳 深度思考**: 基于遗传算法的多分支思考引擎  
 ✅ **🔄 配置热更新**: 实时配置变更，无需重启应用  
 ✅ **💾 持久化上下文**: 重启后自动恢复历史对话上下文  
+✅ **🔧 系统检测**: 内置完整的系统环境检测和依赖验证功能  
 
 ---
 
@@ -155,14 +159,89 @@ docker run -d \
 
 ---
 
+## 📁 项目结构
+
+NagaAgent 3.1 采用模块化架构设计，各功能模块独立且可扩展：
+
+```
+NagaAgent/
+├── 📁 apiserver/              # API服务器模块
+│   ├── api_server.py          # FastAPI服务器
+│   ├── streaming_tool_extractor.py  # 流式工具调用提取器
+│   └── tool_call_utils.py     # 工具调用工具类
+├── 📁 system/                 # 系统核心模块
+│   ├── system_checker.py      # 系统环境检测器
+│   ├── config_manager.py      # 配置管理器
+│   └── conversation_core.py   # 对话核心引擎
+├── 📁 ui/                     # 用户界面模块
+│   ├── live2d/                # Live2D集成模块
+│   │   ├── renderer.py        # Live2D渲染器
+│   │   ├── animator.py        # 动画系统
+│   │   └── widget.py          # Live2D组件
+│   ├── live2d_side_widget.py  # Live2D侧栏容器
+│   ├── pyqt_chat_window.py    # 主聊天窗口
+│   └── message_renderer.py    # 消息渲染器
+├── 📁 voice/                  # 语音处理模块
+│   ├── input/                 # 语音输入服务
+│   │   ├── server.py          # ASR服务器
+│   │   ├── vad_worker.py      # VAD端点检测
+│   │   └── asr_client.py      # ASR客户端
+│   └── output/                # 语音输出服务
+│       ├── tts_handler.py     # TTS处理器
+│       └── voice_integration.py # 语音集成
+├── 📁 mcpserver/              # MCP服务模块
+│   ├── agent_manager.py       # Agent管理器
+│   ├── agent_*/               # 各种Agent服务
+│   └── mcp_manager.py         # MCP管理器
+├── 📁 thinking/               # 思考引擎模块
+│   ├── tree_thinking.py       # 树形思考引擎
+│   ├── genetic_pruning.py     # 遗传算法剪枝
+│   └── thinking_node.py       # 思考节点
+├── 📁 summer_memory/          # 记忆系统模块
+│   ├── memory_manager.py      # 记忆管理器
+│   ├── quintuple_extractor.py # 五元组提取器
+│   └── graph.py               # 图数据库操作
+├── 📁 logs/                   # 日志和存储
+│   ├── knowledge_graph/       # 知识图谱数据
+│   └── prompts/               # 提示词存储
+├── 📁 mqtt_tool/              # MQTT通信工具
+├── 📁 ui/tray/                # 系统托盘模块
+└── 📄 main.py                 # 主程序入口
+```
+
+**核心模块说明：**
+- **system/**: 系统核心功能，包括环境检测、配置管理、对话引擎
+- **ui/**: 用户界面，支持Live2D、PyQt5、系统托盘等
+- **voice/**: 语音处理，分离输入/输出，支持ASR和TTS
+- **mcpserver/**: MCP服务生态，支持多种Agent和工具
+- **thinking/**: 智能思考引擎，支持多分支推理
+- **summer_memory/**: 知识图谱记忆系统，基于Neo4j
+
+---
+
 ## 🛠️ 详细安装指南
 
-### 🔍 环境检查
+### 🔍 系统环境检测
 
-安装完成后，运行环境检查：
+NagaAgent 3.1 内置了完整的系统环境检测功能，自动检测Python版本、虚拟环境、依赖包等：
+
 ```bash
-python check_env.py
+# 运行系统环境检测
+python -c "from system.system_checker import SystemChecker; SystemChecker().check_all()"
+
+# 或者通过主程序自动检测
+python main.py --check-env
 ```
+
+**检测项目包括：**
+- ✅ Python版本兼容性检查
+- ✅ 虚拟环境状态检测
+- ✅ 核心依赖包完整性验证
+- ✅ 可选依赖包可用性检查
+- ✅ 配置文件格式验证
+- ✅ 目录结构完整性检查
+- ✅ 文件权限和访问性测试
+- ✅ 系统资源使用情况监控
 
 ### 📦 依赖说明
 
@@ -308,6 +387,8 @@ restore_config_snapshot(snapshot)
 - **context_load_days**: 从最近几天的日志文件中加载历史对话（默认：3天）
 - **context_parse_logs**: 是否从日志文件解析上下文（默认：true）
 
+**前端历史记录显示**: 启用持久化上下文后，重启应用时前端UI会自动加载并显示历史聊天记录，无需手动操作。
+
 ### API服务器配置
 ```json
 {
@@ -347,6 +428,39 @@ restore_config_snapshot(snapshot)
   }
 }
 ```
+
+### Live2D集成配置
+```json
+{
+  "live2d": {
+    "enabled": true,
+    "model_path": "path/to/your/model.model3.json",
+    "fallback_image": "ui/standby.png"
+  }
+}
+```
+
+#### Live2D模块特性
+- **独立模块设计**: 不依赖外部Live2D项目，完全自主实现
+- **完整动画系统**: 支持眨眼、眼球跟踪、身体摆动、呼吸、情绪等动画
+- **自动回退机制**: Live2D不可用时自动切换到图片模式
+- **鼠标交互**: 支持点击触发动作和眼球跟踪
+- **资源管理**: 完整的资源加载和清理机制
+
+#### Live2D模块结构
+```
+ui/live2d/
+├── __init__.py          # 模块初始化
+├── renderer.py          # Live2D渲染器
+├── animator.py          # 动画系统
+├── widget.py            # Live2D Widget组件
+└── README.md            # 详细文档
+```
+
+#### Live2D配置说明
+- **enabled**: 是否启用Live2D功能
+- **model_path**: Live2D模型文件路径（.model3.json格式）
+- **fallback_image**: 回退图片路径（Live2D不可用时使用）
 
 ### 获取 API 密钥
 1. 访问对应的LLM服务商官网（如DeepSeek、OpenAI等）
@@ -401,6 +515,7 @@ restore_config_snapshot(snapshot)
 - **独立对话框**: 每个对话都是独立的对话框组件，采用直角设计，支持自动高度调整
 - **工具调用对话框**: 专门为工具调用设计的对话框，没有用户名标签，保持简洁的UI风格
 - **透明背景**: 主聊天区域使用透明背景，对话框保持原有样式
+- **🎭 Live2D集成**: 独立的Live2D模块，支持模型和图片的混合侧栏显示，自动回退机制
 - **Markdown 支持**: 完整的 Markdown 语法支持和代码高亮
 - **主题定制**: 支持界面主题、透明度等自定义
 - **响应式设计**: 自适应不同屏幕尺寸
@@ -950,6 +1065,7 @@ print(result["answer"])  # 输出综合后的最终答案
 - **深度思考引擎**: 基于遗传算法的多分支思考系统
 - **AgentManager**: 独立的Agent注册和调用系统
 - **模块化UI渲染**: 新的消息渲染系统，支持名字+消息框布局
+- **🎭 Live2D集成**: 独立的Live2D模块，支持模型和图片的混合侧栏显示，自动回退机制
 - **MQTT通信支持**: 新增MQTT工具模块
 - **Word文档处理**: 集成Office Word MCP服务
 - **漫画下载Agent**: 新增漫画下载功能Agent

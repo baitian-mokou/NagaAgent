@@ -7,8 +7,7 @@ import asyncio
 import time
 from PyQt5.QtCore import QThread, pyqtSignal
 from ui.response_utils import extract_message
-import config  # 导入配置模块
-from config import AI_NAME
+from system.config import config, AI_NAME  # 导入配置模块
 
 class EnhancedWorker(QThread):
     """增强版工作线程"""
@@ -29,7 +28,7 @@ class EnhancedWorker(QThread):
         
         # 初始化语音集成模块
         try:
-            from voice.voice_integration import get_voice_integration
+            from voice.output.voice_integration import get_voice_integration
             self.voice_integration = get_voice_integration()
         except Exception as e:
             print(f"语音集成初始化失败: {e}")

@@ -3,7 +3,7 @@ import os
 import asyncio
 from pathlib import Path
 from typing import Dict, Any, Optional
-from config import config
+from system.config import config
 
 try:
     from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
@@ -226,6 +226,15 @@ class Crawl4aiAgent:
                 javascript_enabled = data.get("javascript_enabled", True)
                 screenshot = data.get("screenshot", False)
                 max_chars = data.get("max_chars")
+                if max_chars is not None:
+                    try:
+                        max_chars = int(max_chars)
+                    except (ValueError, TypeError):
+                        return json.dumps({
+                            "status": "error",
+                            "message": f"无效的max_chars参数: '{max_chars}'，必须是一个有效的整数。",
+                            "data": {}
+                        }, ensure_ascii=False)
                 
                 # 执行解析
                 crawl_result = await self.crawl_page(

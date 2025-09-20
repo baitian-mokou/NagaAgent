@@ -12,8 +12,9 @@ from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication
 
 # 本地模块导入
-from config import config, AI_NAME
-from conversation_core import NagaConversation
+from system.system_checker import run_system_check
+from system.config import config, AI_NAME
+from system.conversation_core import NagaConversation
 from summer_memory.memory_manager import memory_manager
 from summer_memory.task_manager import start_task_manager, task_manager
 from ui.pyqt_chat_window import ChatWindow
@@ -119,28 +120,27 @@ class ServiceManager:
             print(f"❌ API服务器启动异常: {e}")
     
     def start_tts_server(self):
-        """启动TTS服务"""
+        """启动语音输出服务（TTS）"""
         try:
             if not self.check_port_available("0.0.0.0", config.tts.port):
-                print(f"⚠️ 端口 {config.tts.port} 已被占用，跳过TTS服务启动")
+                print(f"⚠️ 端口 {config.tts.port} 已被占用，跳过语音输出服务启动")
                 return
             
-            print("🚀 正在启动TTS服务...")
             print(f"📍 地址: http://127.0.0.1:{config.tts.port}")
             
             def run_tts():
                 try:
-                    from voice.start_voice_service import start_http_server
+                    from voice.output.start_voice_service import start_http_server
                     start_http_server()
                 except Exception as e:
-                    print(f"❌ TTS服务启动失败: {e}")
+                    print(f"❌ 语音输出服务启动失败: {e}")
             
             self.tts_thread = threading.Thread(target=run_tts, daemon=True)
             self.tts_thread.start()
-            print("✅ TTS服务已在后台启动")
+            print("✅ 语音输出服务已在后台启动")
             time.sleep(1)
         except Exception as e:
-            print(f"❌ TTS服务启动异常: {e}")
+            print(f"❌ 语音输出服务启动异常: {e}")
     
     def show_naga_portal_status(self):
         """显示NagaPortal配置状态（手动调用）"""
@@ -225,8 +225,8 @@ if config.api_server.enabled and config.api_server.auto_start:
 
 service_manager.start_tts_server()
 
-# MQTT连接已在后台异步执行，连接完成后会自动显示状态
-print("⏳ MQTT正在后台初始化连接...")
+# 物联网通讯连接已在后台异步执行，连接完成后会自动显示状态
+print("⏳ 物联网通讯正在后台初始化连接...")
 
 # NagaPortal自动登录已在后台异步执行，登录完成后会自动显示状态
 print("⏳ NagaPortal正在后台自动登录...")
@@ -243,6 +243,20 @@ class NagaAgentAdapter:
 
 # 主程序入口
 if __name__ == "__main__":
+    # 系统环境检测
+    print("🚀 正在启动NagaAgent...")
+    print("=" * 50)
+    
+    # 执行系统检测（只在第一次启动时检测）
+    if not run_system_check():
+        print("\n❌ 系统环境检测失败，程序无法启动")
+        print("请根据上述建议修复问题后重新启动")
+        input("按回车键退出...")
+        sys.exit(1)
+    
+    print("\n🎉 系统环境检测通过，正在启动应用...")
+    print("=" * 50)
+    
     if not asyncio.get_event_loop().is_running():
         asyncio.set_event_loop(asyncio.new_event_loop())
     

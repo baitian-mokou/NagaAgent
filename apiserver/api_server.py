@@ -41,12 +41,12 @@ from .prompt_logger import prompt_logger  # 导入prompt日志记录器
 
 # 导入配置系统
 try:
-    from config import config, AI_NAME  # 使用新的配置系统
+    from system.config import config, AI_NAME  # 使用新的配置系统
 except ImportError:
     import sys
     import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from config import config, AI_NAME  # 使用新的配置系统
+    from system.config import config, AI_NAME  # 使用新的配置系统
 from ui.response_utils import extract_message  # 导入消息提取工具
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX  # handoff提示词
 
@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
     try:
         print("[INFO] 正在初始化NagaAgent...")
         # 延迟导入避免循环依赖
-        from conversation_core import NagaConversation
+        from system.conversation_core import NagaConversation
         naga_agent = NagaConversation()  # 第四次初始化：API服务器启动时创建
         print("[SUCCESS] NagaAgent初始化完成")
         yield
@@ -309,7 +309,16 @@ async def chat(request: ChatRequest):
                 if resp.status != 200:
                     # 保存失败的prompt日志
                     prompt_logger.log_prompt(session_id, messages, api_status="failed")
-                    raise HTTPException(status_code=resp.status, detail="LLM API调用失败")
+                    error_detail = f"LLM API调用失败 (状态码: {resp.status})"
+                    if resp.status == 401:
+                        error_detail = "LLM API认证失败，请检查API密钥"
+                    elif resp.status == 403:
+                        error_detail = "LLM API访问被拒绝，请检查权限"
+                    elif resp.status == 429:
+                        error_detail = "LLM API请求过于频繁，请稍后重试"
+                    elif resp.status >= 500:
+                        error_detail = f"LLM API服务器错误 (状态码: {resp.status})"
+                    raise HTTPException(status_code=resp.status, detail=error_detail)
                 
                 # 处理流式响应
                 async for line in resp.content:
@@ -389,7 +398,7 @@ async def chat_stream(request: ChatRequest):
             voice_integration = None
             if config.system.voice_enabled:
                 try:
-                    from voice.voice_integration import get_voice_integration
+                    from voice.output.voice_integration import get_voice_integration
                     voice_integration = get_voice_integration()
                 except Exception as e:
                     print(f"语音集成初始化失败: {e}")
@@ -456,7 +465,16 @@ async def chat_stream(request: ChatRequest):
                         if resp.status != 200:
                             # 保存失败的prompt日志
                             prompt_logger.log_prompt(session_id, messages, api_status="failed")
-                            raise HTTPException(status_code=resp.status, detail="LLM API调用失败")
+                            error_detail = f"LLM API调用失败 (状态码: {resp.status})"
+                            if resp.status == 401:
+                                error_detail = "LLM API认证失败，请检查API密钥"
+                            elif resp.status == 403:
+                                error_detail = "LLM API访问被拒绝，请检查权限"
+                            elif resp.status == 429:
+                                error_detail = "LLM API请求过于频繁，请稍后重试"
+                            elif resp.status >= 500:
+                                error_detail = f"LLM API服务器错误 (状态码: {resp.status})"
+                            raise HTTPException(status_code=resp.status, detail=error_detail)
                         
                         # 处理流式响应
                         async for line in resp.content:
