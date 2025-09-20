@@ -136,14 +136,13 @@ class NagaConversation: # 对话主类
             return
             
         try:
-            from logs.log_context_parser import get_log_parser
-            parser = get_log_parser()
+            from apiserver.message_manager import message_manager
             
             # 计算最大消息数量
             max_messages = config.api.max_history_rounds * 2
             
             # 加载历史对话
-            recent_messages = parser.load_recent_context(
+            recent_messages = message_manager.load_recent_context(
                 days=config.api.context_load_days,
                 max_messages=max_messages
             )
