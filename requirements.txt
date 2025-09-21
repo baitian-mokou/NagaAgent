@@ -13,6 +13,7 @@ python-dateutil>=2.9.0.post0
 py2neo>=2021.2.3
 pyvis>=0.3.2
 matplotlib>=3.10.0
+neo4j
 
 # API服务器相关依赖
 flask-cors>=6.0.1
@@ -70,6 +71,7 @@ paho-mqtt>=2.0.0
 # 其他工具依赖
 tiktoken
 python-docx>=1.2.0
+onnxruntime
 
 # Live2D相关依赖
 live2d-py>=0.5.4
@@ -80,4 +82,3 @@ opensimplex>=0.4.5.1
 # 搜索工具依赖
 langchain-community>=0.3.29
 crawl4ai
-onnxruntime
