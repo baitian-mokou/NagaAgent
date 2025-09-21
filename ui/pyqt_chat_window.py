@@ -608,14 +608,20 @@ class ChatWindow(QWidget):
         s.worker.finished.connect(s.on_batch_response_finished)
     
     def append_response_chunk(s, chunk):
-        """追加响应片段（流式模式）- 实时显示"""
-        # 检查是否为工具调用检测标记
-        if chunk.startswith("data: [TOOL_CALL]"):
-            # 这是工具调用检测，不累积到娜迦消息中
+        """追加响应片段（流式模式）- 实时显示到普通消息框"""
+        # 检查是否为工具调用相关标记
+        if any(marker in chunk for marker in ["[TOOL_CALL]", "[TOOL_START]", "[TOOL_RESULT]", "[TOOL_ERROR]"]):
+            # 这是工具调用相关标记，不累积到普通消息中
             return
         
+        # 检查是否在工具调用过程中，如果是则创建新的消息框
+        if hasattr(s, '_in_tool_call_mode') and s._in_tool_call_mode:
+            # 工具调用模式结束，创建新的消息框
+            s._in_tool_call_mode = False
+            s._current_message_id = None
+        
         # 实时更新显示 - 立即显示到UI
-        if not hasattr(s, '_current_message_id'):
+        if not hasattr(s, '_current_message_id') or s._current_message_id is None:
             # 第一次收到chunk时，创建新消息
             s._current_message_id = s.add_user_message(AI_NAME, chunk)
             s.current_response = chunk
@@ -671,7 +677,10 @@ class ChatWindow(QWidget):
         s.progress_widget.stop_loading()
     
     def handle_tool_call(s, notification):
-        """处理工具调用通知"""
+        """处理工具调用通知 - 创建工具调用专用渲染框"""
+        # 标记进入工具调用模式
+        s._in_tool_call_mode = True
+        
         # 创建专门的工具调用内容对话框（没有用户名）
         tool_call_dialog = MessageRenderer.create_tool_call_content_message(notification, s.chat_content)
         
@@ -699,7 +708,8 @@ class ChatWindow(QWidget):
             'name': '工具调用',
             'content': notification,
             'full_content': notification,
-            'dialog_widget': tool_call_dialog
+            'dialog_widget': tool_call_dialog,
+            'is_tool_call': True  # 标记为工具调用消息
         }
         
         # 在弹性空间之前插入工具调用对话框
@@ -714,7 +724,7 @@ class ChatWindow(QWidget):
         print(f"工具调用: {notification}")
     
     def handle_tool_result(s, result):
-        """处理工具执行结果"""
+        """处理工具执行结果 - 更新工具调用专用渲染框"""
         # 查找最近的工具调用对话框并更新
         if hasattr(s, '_messages'):
             for message_id, message_info in reversed(list(s._messages.items())):
@@ -735,6 +745,9 @@ class ChatWindow(QWidget):
                             """.strip()
                             dialog_widget.set_nested_content(nested_title, nested_content)
                         break
+        
+        # 工具调用完成，退出工具调用模式，准备接收后续内容
+        s._in_tool_call_mode = False
         
         # 在状态栏也显示工具执行结果
         s.progress_widget.status_label.setText(f"✅ {result[:50]}...")

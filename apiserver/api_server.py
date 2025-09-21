@@ -96,7 +96,10 @@ class CallbackFactory:
         """创建工具结果回调函数"""
         def on_tool_result(result: str, result_type: str):
             """处理工具结果 - 不累积到纯文本"""
-            if result_type == "tool_result":
+            if result_type == "tool_start":
+                if is_streaming:
+                    return f"data: [TOOL_START] {result}\n\n"
+            elif result_type == "tool_result":
                 if is_streaming:
                     return f"data: [TOOL_RESULT] {result}\n\n"
             elif result_type == "tool_error":
@@ -514,7 +517,14 @@ async def chat_stream(request: ChatRequest):
                 yield chunk
             
             # 完成处理
-            await tool_extractor.finish_processing()
+            final_results = await tool_extractor.finish_processing()
+            if final_results:
+                for result in final_results:
+                    yield result
+            
+            # 检查是否需要继续流式输出（工具调用执行后）
+            # 这里可以添加逻辑来处理工具调用执行后的继续流式输出
+            # 例如：如果工具调用执行完成，可以继续调用LLM获取后续内容
             
             # 完成语音处理
             if voice_integration:
