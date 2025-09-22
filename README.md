@@ -221,6 +221,26 @@ NagaAgent/
 
 ## 🛠️ 详细安装指南
 
+### 📦 依赖整合说明
+
+NagaAgent 3.1 已将核心依赖和API服务器相关依赖整合到 `nagaagent-core==1.0.1` 包中，以减少依赖下载负担：
+
+**已整合的依赖包：**
+- **核心依赖**: `mcp`, `openai`, `python-dotenv`, `requests`, `aiohttp`
+- **API服务器依赖**: `flask`, `gevent`, `fastapi`, `uvicorn`
+
+**安装方式：**
+```bash
+# 自动安装 nagaagent-core 包（包含所有核心依赖）
+pip install -r requirements.txt
+```
+
+**优势：**
+- ✅ 减少依赖下载时间
+- ✅ 统一版本管理
+- ✅ 简化安装流程
+- ✅ 提高稳定性
+
 ### 🔍 系统环境检测
 
 NagaAgent 3.1 内置了完整的系统环境检测功能，自动检测Python版本、虚拟环境、依赖包等：

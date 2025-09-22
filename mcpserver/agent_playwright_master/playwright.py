@@ -24,8 +24,8 @@ from agents import (
 )
 
 from agents.mcp import MCPServerStdio # 使用本地通信，标准输入输出与MCP服务通信，在本项目中创建Playwright MCP 服务的连接
-from openai import AsyncOpenAI # 导入OpenAI 异步客户端，在本项目中用于创建于 Deepseek API 的异步通信客户端
-from dotenv import load_dotenv # 导入dotenv库，在本项目中用于加载环境变量文件
+from nagaagent_core.core import AsyncOpenAI # 导入OpenAI 异步客户端，在本项目中用于创建于 Deepseek API 的异步通信客户端
+from nagaagent_core.core import load_dotenv # 导入dotenv库，在本项目中用于加载环境变量文件
 
 load_dotenv() # 加载环境变量文件
 

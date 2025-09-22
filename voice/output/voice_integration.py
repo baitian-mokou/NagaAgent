@@ -15,7 +15,7 @@ import re
 import io
 import base64
 from typing import Optional, List, Dict, Any
-import aiohttp
+from nagaagent_core.core import aiohttp
 import sys
 from pathlib import Path
 from queue import Queue, Empty

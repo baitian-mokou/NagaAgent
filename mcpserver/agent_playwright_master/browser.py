@@ -3,7 +3,7 @@ from system.config import *  # 配置参数统一管理 #
 import asyncio
 import html2text  # 用于HTML转Markdown #
 import os
-from dotenv import load_dotenv
+from nagaagent_core.core import load_dotenv
 from agents import Agent, AgentHooks, RunContextWrapper
 # 移除循环导入
 # from .controller import BrowserAgent

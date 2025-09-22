@@ -21,14 +21,14 @@ logging.getLogger("httpcore.http11").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
 
-import uvicorn
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
-from fastapi import WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
+from nagaagent_core.api import uvicorn
+from nagaagent_core.api import FastAPI, HTTPException, BackgroundTasks, Request, UploadFile, File, Form
+from nagaagent_core.api import CORSMiddleware
+from nagaagent_core.api import StreamingResponse, JSONResponse, HTMLResponse
+from nagaagent_core.api import WebSocket, WebSocketDisconnect
+from nagaagent_core.api import StaticFiles
 from pydantic import BaseModel
-import aiohttp
+from nagaagent_core.core import aiohttp
 import shutil
 from pathlib import Path
 
@@ -192,6 +192,7 @@ class ChatRequest(BaseModel):
     message: str
     stream: bool = False
     session_id: Optional[str] = None
+    use_self_game: bool = False
 
 class ChatResponse(BaseModel):
     response: str
@@ -302,6 +303,26 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="消息内容不能为空")
     
     try:
+        # 分支: 启用博弈论流程（非流式，返回聚合文本）
+        if request.use_self_game:
+            try:
+                # 延迟导入以避免启动时循环依赖
+                from game.naga_game_system import NagaGameSystem
+                from game.core.models.config import GameConfig
+                # 创建系统并执行用户问题处理
+                system = NagaGameSystem(GameConfig())
+                system_response = await system.process_user_question(
+                    user_question=request.message,
+                    user_id=request.session_id or "api_user"
+                )
+                return ChatResponse(
+                    response=system_response.content,
+                    session_id=request.session_id,
+                    status="success"
+                )
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"博弈论流程失败: {str(e)}")
+
         # 获取或创建会话ID
         session_id = message_manager.create_session(request.session_id)
         

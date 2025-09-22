@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import List, Dict
 
 # 第三方库导入
-from openai import AsyncOpenAI
+from nagaagent_core.core import AsyncOpenAI
 
 # 本地模块导入
 from apiserver.tool_call_utils import tool_call_loop
