@@ -213,9 +213,7 @@ class ThinkingConfig(BaseModel):
     max_thinking_depth: int = Field(default=5, ge=1, le=10, description="最大思考深度层级")
     next_question_generation: bool = Field(default=False, description="生成下一级问题")
 
-class WeatherConfig(BaseModel):
-    """天气服务配置"""
-    api_key: str = Field(default="", description="天气服务API密钥")
+# 天气服务使用免费API，无需配置
 
 class MQTTConfig(BaseModel):
     """MQTT配置"""
@@ -359,7 +357,7 @@ class NagaConfig(BaseModel):
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     thinking: ThinkingConfig = Field(default_factory=ThinkingConfig)
     prompts: SystemPrompts = Field(default_factory=SystemPrompts)
-    weather: WeatherConfig = Field(default_factory=WeatherConfig)
+    # weather: 天气服务使用免费API，无需配置
     mqtt: MQTTConfig = Field(default_factory=MQTTConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
     live2d: Live2DConfig = Field(default_factory=Live2DConfig)
