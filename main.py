@@ -8,8 +8,14 @@ import threading
 import time
 
 # 第三方库导入
-from PyQt5.QtGui import QIcon  # 直接依赖 #
-from PyQt5.QtWidgets import QApplication  # 直接依赖 #
+# 优先使用仓库内的本地包，防止导入到系统已安装的旧版 nagaagent_core #
+REPO_ROOT = os.path.dirname(os.path.abspath(__file__))  # 统一入口 #
+LOCAL_PKG_DIR = os.path.join(REPO_ROOT, "nagaagent-core")  # 统一入口 #
+if LOCAL_PKG_DIR not in sys.path:
+    sys.path.insert(0, LOCAL_PKG_DIR)  # 优先使用本地包 #
+
+from nagaagent_core.vendors.PyQt5.QtGui import QIcon  # 统一入口 #
+from nagaagent_core.vendors.PyQt5.QtWidgets import QApplication  # 统一入口 #
 
 # 本地模块导入
 from system.system_checker import run_system_check
@@ -89,7 +95,7 @@ class ServiceManager:
                 print(f"⚠️ 端口 {config.api_server.port} 已被占用，跳过API服务器启动")
                 return
             
-            import uvicorn
+            from nagaagent_core.api import uvicorn  # 统一入口 #
             
             print("🚀 正在启动夏园API服务器...")
             print(f"📍 地址: http://{config.api_server.host}:{config.api_server.port}")
