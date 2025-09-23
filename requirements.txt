@@ -1,5 +1,5 @@
 # 核心依赖 (已整合到nagaagent-core==1.0.1)
-nagaagent-core==1.0.3
+nagaagent-core==1.0.5
 
 # GRAG知识图谱相关依赖
 py2neo>=2021.2.3
