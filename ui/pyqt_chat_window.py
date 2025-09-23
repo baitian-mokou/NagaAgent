@@ -1,8 +1,8 @@
 import sys, os; sys.path.insert(0, os.path.abspath(os.path.dirname(__file__) + '/..'))
 from .styles.button_factory import ButtonFactory
-from PyQt5.QtWidgets import QApplication, QWidget, QTextEdit, QSizePolicy, QHBoxLayout, QLabel, QVBoxLayout, QStackedLayout, QPushButton, QStackedWidget, QDesktopWidget, QScrollArea, QSplitter, QFileDialog, QMessageBox, QFrame
-from PyQt5.QtCore import Qt, QRect, QParallelAnimationGroup, QPropertyAnimation, QEasingCurve, QTimer
-from PyQt5.QtGui import QColor, QPainter, QBrush, QFont, QPen
+from PyQt5.QtWidgets import QApplication, QWidget, QTextEdit, QSizePolicy, QHBoxLayout, QLabel, QVBoxLayout, QStackedLayout, QPushButton, QStackedWidget, QDesktopWidget, QScrollArea, QSplitter, QFileDialog, QMessageBox, QFrame  # 直接依赖 #
+from PyQt5.QtCore import Qt, QRect, QParallelAnimationGroup, QPropertyAnimation, QEasingCurve, QTimer  # 直接依赖 #
+from PyQt5.QtGui import QColor, QPainter, QBrush, QFont, QPen  # 直接依赖 #
 from system.conversation_core import NagaConversation
 import os
 from system.config import config, AI_NAME, Live2DConfig # 导入统一配置
@@ -1101,9 +1101,9 @@ class ChatWindow(QWidget):
     
     def show_document_options(s, file_path, filename):
         """显示文档处理选项"""
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QFrame, QPushButton
-        from PyQt5.QtCore import Qt
-        from PyQt5.QtGui import QFont
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QFrame, QPushButton  # 直接依赖 #
+        from PyQt5.QtCore import Qt  # 直接依赖 #
+        from PyQt5.QtGui import QFont  # 直接依赖 #
         
         dialog = QDialog(s)
         dialog.setWindowTitle("文档处理选项")

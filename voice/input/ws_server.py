@@ -2,7 +2,7 @@ import asyncio  # 异步 #
 import json  # JSON #
 import base64  # base64 #
 from typing import List  # 类型 #
-import numpy as np  # 数值 #
+import nagaagent_core.vendors.numpy as np  # 数值 #
 from nagaagent_core.api import WebSocket, WebSocketDisconnect  # WebSocket #
 from io import BytesIO  # 内存流 #
 import soundfile as sf  # 音频 #

@@ -6,9 +6,9 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                             QPushButton, QLineEdit, QCheckBox, QSpinBox, 
                             QDoubleSpinBox, QComboBox, QFrame, QScrollArea,
-                            QSlider, QTextEdit, QGroupBox, QGridLayout, QFileDialog)
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve
-from PyQt5.QtGui import QFont, QPainter, QColor
+                            QSlider, QTextEdit, QGroupBox, QGridLayout, QFileDialog)  # 直接依赖 #
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve  # 直接依赖 #
+from PyQt5.QtGui import QFont, QPainter, QColor  # 直接依赖 #
 import sys
 import os
 import json
@@ -1044,7 +1044,7 @@ class ElegantSettingsWidget(QWidget):
 
 
 if __name__ == "__main__":
-    from PyQt5.QtWidgets import QApplication
+    from PyQt5.QtWidgets import QApplication  # 直接依赖 #
     
     app = QApplication([])
     

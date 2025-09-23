@@ -48,7 +48,6 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from system.config import config, AI_NAME  # 使用新的配置系统
 from ui.response_utils import extract_message  # 导入消息提取工具
-from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX  # handoff提示词
 
 # 全局NagaAgent实例 - 延迟导入避免循环依赖
 naga_agent = None
@@ -329,7 +328,7 @@ async def chat(request: ChatRequest):
         # 构建系统提示词
         available_services = naga_agent.mcp.get_available_services_filtered()
         services_text = naga_agent._format_services_for_prompt(available_services)
-        system_prompt = f"{RECOMMENDED_PROMPT_PREFIX}\n{config.prompts.naga_system_prompt.format(ai_name=AI_NAME, **services_text)}"
+        system_prompt = config.prompts.naga_system_prompt.format(ai_name=AI_NAME, **services_text)
         
         # 使用消息管理器构建完整的对话消息
         messages = message_manager.build_conversation_messages(
@@ -442,7 +441,7 @@ async def chat_stream(request: ChatRequest):
             # 构建系统提示词
             available_services = naga_agent.mcp.get_available_services_filtered()
             services_text = naga_agent._format_services_for_prompt(available_services)
-            system_prompt = f"{RECOMMENDED_PROMPT_PREFIX}\n{config.prompts.naga_system_prompt.format(ai_name=AI_NAME, **services_text)}"
+            system_prompt = config.prompts.naga_system_prompt.format(ai_name=AI_NAME, **services_text)
             
             # 使用消息管理器构建完整的对话消息
             messages = message_manager.build_conversation_messages(

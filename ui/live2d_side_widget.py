@@ -4,9 +4,9 @@ import json
 import time
 import threading
 from pathlib import Path
-from PyQt5.QtWidgets import QWidget, QStackedLayout, QLabel, QSizePolicy
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QPixmap, QPainter, QColor, QBrush, QPen
+from PyQt5.QtWidgets import QWidget, QStackedLayout, QLabel, QSizePolicy  # 直接依赖 #
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal  # 直接依赖 #
+from PyQt5.QtGui import QPixmap, QPainter, QColor, QBrush, QPen  # 直接依赖 #
 
 # 导入独立的Live2D模块
 try:

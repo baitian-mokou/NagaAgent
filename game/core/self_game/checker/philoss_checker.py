@@ -17,7 +17,7 @@ import time
 import re
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
-import numpy as np
+import nagaagent_core.vendors.numpy as np
 
 from ...models.data_models import HiddenState, TextBlock, NoveltyScore
 from ...models.config import GameConfig
@@ -82,8 +82,8 @@ class PhilossChecker:
             # 检查是否有可用的模型环境
             try:
                 import torch
-                import transformers
-                from transformers import AutoTokenizer, AutoModelForCausalLM
+                import nagaagent_core.vendors.transformers as transformers
+                from nagaagent_core.vendors.transformers import AutoTokenizer, AutoModelForCausalLM
                 
                 # 自动设备检测：CUDA不可用则使用CPU
                 if not getattr(torch, 'cuda', None) or not torch.cuda.is_available():

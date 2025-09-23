@@ -5,9 +5,9 @@ Live2D Widget
 基于QGLWidget的Live2D显示组件
 """
 
-from PyQt5.QtWidgets import QWidget
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtOpenGL import QGLWidget
+from PyQt5.QtWidgets import QWidget  # 直接依赖 #
+from PyQt5.QtCore import Qt, QTimer  # 直接依赖 #
+from PyQt5.QtOpenGL import QGLWidget  # 直接依赖 #
 
 from .renderer import Live2DRenderer
 from .animator import Live2DAnimator

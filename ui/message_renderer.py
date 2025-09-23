@@ -1,9 +1,9 @@
 # message_renderer.py # 独立的消息渲染器
 import sys, os; sys.path.insert(0, os.path.abspath(os.path.dirname(__file__) + '/..'))
 from typing import List
-from PyQt5.QtWidgets import QFrame, QVBoxLayout, QLabel, QWidget, QSizePolicy, QPushButton, QHBoxLayout
-from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer
-from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import QFrame, QVBoxLayout, QLabel, QWidget, QSizePolicy, QPushButton, QHBoxLayout  # 直接依赖 #
+from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer  # 直接依赖 #
+from PyQt5.QtGui import QFont  # 直接依赖 #
 from system.config import config
 
 # 使用统一配置系统

@@ -28,11 +28,11 @@ def check_dependencies() -> bool:
     except Exception:
         missing.append("uvicorn")  # 记录 #
     try:
-        import numpy  # noqa: F401 #
+        import nagaagent_core.vendors.numpy as numpy  # noqa: F401 #
     except Exception:
         missing.append("numpy")  # 记录 #
     try:
-        import scipy  # noqa: F401 #
+        import nagaagent_core.vendors.scipy as scipy  # noqa: F401 #
     except Exception:
         missing.append("scipy")  # 记录 #
     

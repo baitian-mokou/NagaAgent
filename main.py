@@ -8,8 +8,8 @@ import threading
 import time
 
 # 第三方库导入
-from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtGui import QIcon  # 直接依赖 #
+from PyQt5.QtWidgets import QApplication  # 直接依赖 #
 
 # 本地模块导入
 from system.system_checker import run_system_check

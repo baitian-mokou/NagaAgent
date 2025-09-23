@@ -17,7 +17,6 @@ from nagaagent_core.core import AsyncOpenAI
 from apiserver.tool_call_utils import tool_call_loop
 from system.config import config, AI_NAME
 from mcpserver.mcp_manager import get_mcp_manager
-from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 # from thinking import TreeThinkingEngine
 # from thinking.config import COMPLEX_KEYWORDS  # 已废弃，不再使用
 
@@ -487,7 +486,7 @@ class NagaConversation: # 对话主类
             services_text = self._format_services_for_prompt(available_services)
             
             # 添加handoff提示词 - 先获取服务信息再格式化
-            system_prompt = f"{RECOMMENDED_PROMPT_PREFIX}\n{config.prompts.naga_system_prompt.format(ai_name=AI_NAME, **services_text)}"
+            system_prompt = config.prompts.naga_system_prompt.format(ai_name=AI_NAME, **services_text)
             
             # 使用消息管理器统一的消息拼接逻辑（UI界面使用）
             from apiserver.message_manager import message_manager
