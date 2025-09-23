@@ -304,23 +304,31 @@ async def chat(request: ChatRequest):
     try:
         # 分支: 启用博弈论流程（非流式，返回聚合文本）
         if request.use_self_game:
-            try:
-                # 延迟导入以避免启动时循环依赖
-                from game.naga_game_system import NagaGameSystem
-                from game.core.models.config import GameConfig
-                # 创建系统并执行用户问题处理
-                system = NagaGameSystem(GameConfig())
-                system_response = await system.process_user_question(
-                    user_question=request.message,
-                    user_id=request.session_id or "api_user"
-                )
-                return ChatResponse(
-                    response=system_response.content,
-                    session_id=request.session_id,
-                    status="success"
-                )
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"博弈论流程失败: {str(e)}")
+            # 配置项控制：失败时可跳过回退到普通对话 #
+            skip_on_error = getattr(getattr(config, 'game', None), 'skip_on_error', True)  # 兼容无配置情况 #
+            enabled = getattr(getattr(config, 'game', None), 'enabled', False)  # 控制总开关 #
+            if enabled:
+                try:
+                    # 延迟导入以避免启动时循环依赖 #
+                    from game.naga_game_system import NagaGameSystem  # 博弈系统入口 #
+                    from game.core.models.config import GameConfig  # 博弈系统配置 #
+                    # 创建系统并执行用户问题处理 #
+                    system = NagaGameSystem(GameConfig())
+                    system_response = await system.process_user_question(
+                        user_question=request.message,
+                        user_id=request.session_id or "api_user"
+                    )
+                    return ChatResponse(
+                        response=system_response.content,
+                        session_id=request.session_id,
+                        status="success"
+                    )
+                except Exception as e:
+                    print(f"[WARNING] 博弈论流程失败，将{ '回退到普通对话' if skip_on_error else '返回错误' }: {e}")  # 运行时警告 #
+                    if not skip_on_error:
+                        raise HTTPException(status_code=500, detail=f"博弈论流程失败: {str(e)}")
+                    # 否则继续走普通对话流程 #
+            # 若未启用或被配置跳过，则直接回退到普通对话分支 #
 
         # 获取或创建会话ID
         session_id = message_manager.create_session(request.session_id)

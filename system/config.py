@@ -342,6 +342,11 @@ Agent服务：
         description="下一级问题生成系统提示词"
     )
 
+class GameModuleConfig(BaseModel):
+    """博弈论模块配置"""
+    enabled: bool = Field(default=False, description="是否启用博弈论流程")
+    skip_on_error: bool = Field(default=True, description="博弈论流程失败时是否回退到普通对话")
+
 class NagaConfig(BaseModel):
     """NagaAgent主配置类"""
     system: SystemConfig = Field(default_factory=SystemConfig)
@@ -357,6 +362,7 @@ class NagaConfig(BaseModel):
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     thinking: ThinkingConfig = Field(default_factory=ThinkingConfig)
     prompts: SystemPrompts = Field(default_factory=SystemPrompts)
+    game: GameModuleConfig = Field(default_factory=GameModuleConfig)
     # weather: 天气服务使用免费API，无需配置
     mqtt: MQTTConfig = Field(default_factory=MQTTConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
