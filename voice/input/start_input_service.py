@@ -35,6 +35,11 @@ def check_dependencies() -> bool:
         import nagaagent_core.vendors.scipy as scipy  # noqa: F401 #
     except Exception:
         missing.append("scipy")  # 记录 #
+    try:
+        from nagaagent_core.vendors.httpx import Client as _HttpxClient  # 占位以检查可用性 #
+        import nagaagent_core.vendors.httpx as httpx
+    except Exception:
+        httpx = None
     
     if missing:
         print("❌ 语音输入服务缺少依赖: " + ", ".join(missing))  # 打印 #

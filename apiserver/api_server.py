@@ -27,7 +27,7 @@ from nagaagent_core.api import CORSMiddleware
 from nagaagent_core.api import StreamingResponse, JSONResponse, HTMLResponse
 from nagaagent_core.api import WebSocket, WebSocketDisconnect
 from nagaagent_core.api import StaticFiles
-from pydantic import BaseModel
+from nagaagent_core.vendors.pydantic import BaseModel
 from nagaagent_core.core import aiohttp
 import shutil
 from pathlib import Path

@@ -10,19 +10,19 @@ neo4j
 # API服务器相关依赖 (已整合到nagaagent-core==1.0.1)
 
 # 网络通信相关依赖
-uvicorn[standard]>=0.34.0
+# uvicorn[standard]>=0.34.0  # 已通过 nagaagent_core.api 转发使用 #
 librosa
  
 
 # AI机器学习相关依赖（已迁移到 nagaagent-core==1.0.1，避免本地编译问题）
 
 # 数据处理相关依赖
-pydantic>=2.11.3
-httpx>=0.28.1
+# pydantic>=2.11.3  # 已通过 nagaagent_core.vendors.pydantic 提供 #
+# httpx>=0.28.1     # 已通过 nagaagent_core.vendors.httpx 提供 #
  
 
 # GUI界面相关依赖（PyQt5 已从 core 代理中剥离，改为直接依赖）
-PyQt5>=5.15.10  # Qt GUI #
+# PyQt5>=5.15.10  # Qt GUI - 已通过 nagaagent_core.vendors.PyQt5 提供 #
 
 # 系统控制可选依赖（音量/亮度）
 pycaw>=20240210  # 音量控制（Windows） #
