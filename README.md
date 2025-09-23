@@ -1,21 +1,3 @@
-### AI/ML 依赖迁移
-已确认项目中实际使用 `numpy`、`pandas`、`scipy`、`transformers`，现统一迁移到 `nagaagent-core`，以减少 Windows 上本地编译与二进制兼容问题。  #
-根 `requirements.txt` 已注释对应依赖，安装时由核心包统一拉取。  #
-## 依赖迁移说明（nagaagent-core）
-为简化安装与统一版本管理，以下依赖已迁移至 `nagaagent-core` 的 `install_requires` 中：  #
-
-- PyQt5==5.15.11  # 桌面UI #
-- playwright>=1.52.0  # 浏览器自动化 #
-- pygame>=2.6.0  # 多媒体 #
-- html2text>=2020.1.16  # HTML转文本 #
-- Pillow>=10.0.0  # 图像处理 #
-- screen-brightness-control  # 屏幕亮度 #
-- pycaw  # 系统音量 #
-- comtypes  # Windows COM #
-
-因此在根 `requirements.txt` 中，这些条目已被注释或移除。  #
-
-注意：`pystray` 仍保留在根依赖中（安装脚本与托盘相关文档使用）。  #
 # NagaAgent 3.1
 
 ![NagaAgent Logo](https://img.shields.io/badge/NagaAgent-3.1-blue?style=for-the-badge&logo=python&logoColor=white)
