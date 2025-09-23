@@ -12,15 +12,14 @@ neo4j
 # 网络通信相关依赖
 uvicorn[standard]>=0.34.0
 librosa
-websockets>=14.0
+ 
 
 # AI机器学习相关依赖（已迁移到 nagaagent-core==1.0.1，避免本地编译问题）
 
 # 数据处理相关依赖
 pydantic>=2.11.3
-pydantic-settings>=2.9.1
 httpx>=0.28.1
-typing-extensions>=4.13.2
+ 
 
 # GUI界面相关依赖（PyQt5 已从 core 代理中剥离，改为直接依赖）
 PyQt5>=5.15.10  # Qt GUI #
