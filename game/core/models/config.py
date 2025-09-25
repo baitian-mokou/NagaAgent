@@ -20,11 +20,19 @@ class PhilossConfig:
     mlp_hidden_size: int = 256  # MLP隐藏层大小
     prediction_threshold: float = 0.6  # 预测阈值
     novelty_threshold: float = 0.6  # 创新性阈值
+    cache_dir: str = "models"  # 模型缓存目录（仅忽略仓库根目录 /models）
+    local_files_only: bool = False  # 仅使用本地权重（不联网下载）
+    exclusive_model_loading: bool = True  # 禁止回退到其他模型
     
     def __post_init__(self):
         # 如果没有指定本地路径,使用默认路径
         if not self.model_path:
             self.model_path = os.path.expanduser(f"~/.cache/huggingface/transformers/{self.model_name}")
+        # 确保缓存目录存在
+        try:
+            Path(self.cache_dir).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
 
 
 @dataclass  
