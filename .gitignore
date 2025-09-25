@@ -22,7 +22,7 @@ cache/
 htmlcov/
 
 # 模型文件（大文件）
-models/
+/models/
 
 # IDE配置
 .idea/

@@ -18,6 +18,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List
+import os
+
+# 允许从 game 子目录直接执行本脚本时，正确导入顶层包 `game`
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 # 添加项目路径
 project_root = Path(__file__).parent.parent
@@ -481,7 +488,7 @@ async def run_full_flow_test(user_question: str):
             "log_file": str(test_logger.log_file),
             "report_file": str(test_logger.result_file)
         }
-    
+                
     except Exception as e:
         test_logger.log_error(e, "全流程执行")
         test_logger.finalize_test(False)

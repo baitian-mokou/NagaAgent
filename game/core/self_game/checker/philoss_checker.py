@@ -90,54 +90,35 @@ class PhilossChecker:
                     self.device = 'cpu'
                 dtype = torch.float16 if self.device == 'cuda' else torch.float32
 
-                # 加载模型和tokenizer
-                preferred_models = []
-                # 若配置中给定了模型名，先尝试之
-                if getattr(self.config.philoss, 'model_name', None):
-                    preferred_models.append(self.config.philoss.model_name)
-                # 避免VL模型，给出轻量文本模型候选
-                preferred_models += [
-                    "Qwen/Qwen2.5-1B-Instruct",
-                    "Qwen/Qwen2.5-0.5B-Instruct",
-                    "Qwen/Qwen2.5-1.5B-Instruct",
-                    "Qwen/Qwen2.5-1.8B-Instruct",
-                    "Qwen/Qwen2.5-1.5B",
-                    "qwen/Qwen2.5-1.5B-Instruct"
-                ]
-                load_error: Optional[Exception] = None
-                self.model = None
-                self.tokenizer = None
-                for model_name in preferred_models:
-                    if 'VL' in model_name or 'VL' in model_name.upper():
-                        continue
-                    try:
-                        logger.info(f"加载模型:{model_name}")
-                        self.tokenizer = AutoTokenizer.from_pretrained(
-                            model_name,
-                            trust_remote_code=True
-                        )
-                        self.model = AutoModelForCausalLM.from_pretrained(
-                            model_name,
-                            torch_dtype=dtype,
-                            device_map="auto",
-                            trust_remote_code=True
-                        )
-                        logger.info(f"模型加载成功:{model_name}")
-                        break
-                    except Exception as le:
-                        load_error = le
-                        logger.warning(f"模型加载失败({model_name}): {le}")
-                        self.model = None
-                        self.tokenizer = None
-                 
-                if self.model is None:
-                    if load_error:
-                        logger.error(f"所有候选模型均加载失败: {load_error}")
-                    else:
-                        logger.error("未能加载任何文本模型")
-                    # 进入模拟模式
-                    self.model = None
-                    self.tokenizer = None
+                # 仅允许加载指定的 qwen2.5-vl 1B 或 7B
+                requested = (self.config.philoss.model_name or "").strip()
+                allowed = {
+                    "Qwen/Qwen2.5-VL-1B-Instruct",
+                    "Qwen/Qwen2.5-VL-7B-Instruct",
+                }
+                if requested and requested not in allowed:
+                    logger.warning(f"指定模型 {requested} 不在允许列表，改用最近似允许项。")
+                    # 简单映射：包含"1b"则用1B；否则用7B
+                    requested = "Qwen/Qwen2.5-VL-1B-Instruct" if ("1b" in self.config.philoss.model_name.lower()) else "Qwen/Qwen2.5-VL-7B-Instruct"
+                elif not requested:
+                    requested = "Qwen/Qwen2.5-VL-1B-Instruct"
+
+                logger.info(f"加载模型: {requested}")
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    requested,
+                    trust_remote_code=True,
+                    cache_dir=self.config.philoss.cache_dir,
+                    local_files_only=self.config.philoss.local_files_only,
+                )
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    requested,
+                    torch_dtype=dtype,
+                    device_map="auto",
+                    trust_remote_code=True,
+                    cache_dir=self.config.philoss.cache_dir,
+                    local_files_only=self.config.philoss.local_files_only,
+                )
+                logger.info(f"模型加载成功: {requested}")
                  
                 # 冻结主要参数
                 if self.model is not None:

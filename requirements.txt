@@ -12,6 +12,8 @@ neo4j
 # 网络通信相关依赖
 # uvicorn[standard]>=0.34.0  # 已通过 nagaagent_core.api 转发使用 #
 librosa
+accelerate
+torch
  
 
 # AI机器学习相关依赖（已迁移到 nagaagent-core==1.0.1，避免本地编译问题）
