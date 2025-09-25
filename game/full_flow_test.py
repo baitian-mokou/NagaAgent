@@ -27,6 +27,7 @@ sys.path.insert(0, str(project_root))
 from game.naga_game_system import NagaGameSystem
 from game.core.models.config import GameConfig
 from game.core.models.data_models import Task
+from game.core.self_game.game_engine import GameEngine
 
 class FullFlowTestLogger:
     """全流程测试日志记录器"""
@@ -80,7 +81,8 @@ class FullFlowTestLogger:
             "final_result": None,
             "execution_time": None,
             "success": False,
-            "errors": []
+            "errors": [],
+            "pareto_front": []
         }
     
     def log_step(self, step: str, data: Any = None):
@@ -415,40 +417,71 @@ async def run_full_flow_test(user_question: str):
         test_logger.test_data["final_result"] = response.content
         test_logger.log_node_output("系统", "最终响应", response.content)
         
-        # 7. 模拟博弈轮次（如果需要）
-        test_logger.log_step("模拟博弈轮次")
-        game_rounds = []
-        
-        # 模拟Actor-Criticizer-Checker流程（占位，不依赖Mock）
-        for round_num in range(2):
-            round_data = {
-                "round": round_num + 1,
-                "phase": f"博弈轮次{round_num + 1}",
-                "participants": [agent.name for agent in agents if not agent.is_requester],
-                "summary": f"第{round_num + 1}轮：生成-批判-评估占位摘要"
+        # 7. 启动自博弈引擎（真实执行，不使用占位/模拟）
+        test_logger.log_step("启动自博弈引擎")
+        engine = GameEngine(game_config)
+        session = await engine.start_game_session(task, agents, context=None)
+
+        # 记录每轮真实输出
+        id_to_name = {a.agent_id: a.name for a in agents}
+        real_rounds: List[Dict[str, Any]] = []
+        for rnd in session.rounds:
+            rd = {
+                "round": rnd.round_number,
+                "phase": rnd.phase,
+                "decision": rnd.decision,
+                "round_time": rnd.round_time,
+                "average_critical_score": rnd.metadata.get('average_critical_score'),
+                "average_novelty_score": rnd.metadata.get('average_novelty_score'),
+                "average_satisfaction_score": rnd.metadata.get('average_satisfaction_score'),
+                "actors": [],
+                "critics": [],
+                "philoss": []
             }
-            test_logger.log_node_output(f"Actor轮次{round_num + 1}", "生成", "占位生成...")
-            test_logger.log_node_output(f"Criticizer轮次{round_num + 1}", "批判", "占位批判...")
-            novelty_score = 7.5 + round_num * 0.3
-            test_logger.log_node_output(f"PhilossChecker轮次{round_num + 1}", "评估", f"创新度评分: {novelty_score:.1f}/10")
-            round_data["actor_output"] = "占位生成..."
-            round_data["critic_output"] = "占位批判..."
-            round_data["novelty_score"] = novelty_score
-            game_rounds.append(round_data)
-        test_logger.test_data["game_rounds"] = game_rounds
-        
+            for ao in rnd.actor_outputs:
+                test_logger.log_node_output(id_to_name.get(ao.agent_id, ao.agent_id), "生成", ao.content)
+                rd["actors"].append({
+                    "agent": id_to_name.get(ao.agent_id, ao.agent_id),
+                    "iteration": ao.iteration,
+                    "time": ao.generation_time,
+                    "len": len(ao.content)
+                })
+            for co in rnd.critic_outputs:
+                # 使用 summary_critique 作为日志展示
+                test_logger.log_node_output(id_to_name.get(co.critic_agent_id, co.critic_agent_id), "批判", co.summary_critique)
+                rd["critics"].append({
+                    "critic": id_to_name.get(co.critic_agent_id, co.critic_agent_id),
+                    "overall_score": co.overall_score,
+                    "satisfaction_score": co.satisfaction_score,
+                    "target": co.target_output_id
+                })
+            for po in rnd.philoss_outputs:
+                test_logger.log_node_output("PhilossChecker", "评估", f"新颖度: {po.novelty_score:.3f}")
+                rd["philoss"].append({
+                    "target": po.target_content_id,
+                    "novelty_score": po.novelty_score
+                })
+            real_rounds.append(rd)
+        test_logger.test_data["game_rounds"] = real_rounds
+
+        # 记录帕累托前沿（来自最后一轮 metadata）
+        if session.rounds:
+            last_meta = session.rounds[-1].metadata or {}
+            test_logger.test_data["pareto_front"] = last_meta.get("pareto_front", [])
+  
+         
         # 测试成功
         test_logger.finalize_test(True)
         
         return {
             "success": True,
-            "result": response.content,
+            "result": (session.final_result.actor_output.content if (session.final_result and session.final_result.actor_output) else response.content),
             "agents_generated": len(agents),
             "domain": inferred_domain,
             "log_file": str(test_logger.log_file),
             "report_file": str(test_logger.result_file)
         }
-                
+    
     except Exception as e:
         test_logger.log_error(e, "全流程执行")
         test_logger.finalize_test(False)

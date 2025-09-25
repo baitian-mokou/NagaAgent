@@ -198,6 +198,7 @@ class GameEngine:
                     'evaluation_count': len(philoss_outputs),
                     'average_critical_score': self._calculate_average_critical_score(critic_outputs),
                     'average_novelty_score': self._calculate_average_novelty_score(philoss_outputs),
+                    'average_satisfaction_score': (sum(c.satisfaction_score for c in critic_outputs)/len(critic_outputs)) if critic_outputs else 0.0,
                     'context_length': len(context) if context else 0
                 }
             )
@@ -219,44 +220,57 @@ class GameEngine:
             )
     
     async def _generation_phase(self, 
-                               agents: List[Agent],
-                               task: Task,
-                               context: Optional[str],
-                               previous_rounds: List[GameRound]) -> List[ActorOutput]:
+                                agents: List[Agent],
+                                task: Task,
+                                context: Optional[str],
+                                previous_rounds: List[GameRound]) -> List[ActorOutput]:
         """生成阶段 - Actor组件执行"""
         try:
-            # 准备历史输出作为参考
-            previous_outputs = []
+            # 准备历史Actor输出摘要，供后续批判器使用
+            previous_outputs: List[ActorOutput] = []
             if previous_rounds:
-                for round_data in previous_rounds[-2:]:  # 最近2轮
-                    previous_outputs.extend(round_data.actor_outputs)
-            
+                previous_outputs = previous_rounds[-1].actor_outputs
+ 
             # 筛选出非需求方的智能体进行内容生成
-            execution_agents = [agent for agent in agents if not agent.is_requester]
+            execution_agents = [a for a in agents if not a.is_requester]
             
-            # 并发生成所有执行智能体的内容
+            # 并发生成所有执行智能体的内容（每个角色并行多个分支）
             generation_tasks = []
+            branches = max(1, int(self.config.self_game.branches_per_agent))
             for agent in execution_agents:
                 # 单节点自指轮次控制: 超过最大自指迭代轮次则不再继续该agent生成
                 if getattr(agent, "current_iteration", 0) >= self.config.self_game.max_self_route_iterations:
                     logger.info(f"智能体{agent.name}已达自指最大迭代轮次，停止其本轮生成并回传上游")
                     continue
-                task_coroutine = self.actor.generate_content(
-                    agent, task, context, previous_outputs
-                )
-                generation_tasks.append(task_coroutine)
+                for branch_id in range(1, branches + 1):
+                    task_coroutine = self.actor.generate_content(
+                        agent, task, context, previous_outputs, branch_id=branch_id
+                    )
+                    generation_tasks.append(task_coroutine)
             
             actor_outputs = await asyncio.gather(*generation_tasks, return_exceptions=True)
             
             # 处理结果
             valid_outputs = []
+            # 拼接上一轮Actor摘要，存入metadata.previous_context
+            prev_context_text = ""
+            if previous_outputs:
+                parts = []
+                for prev in previous_outputs[-3:]:
+                    parts.append(f"- {prev.metadata.get('agent_name','未知')} 第{prev.iteration}轮: {prev.content[:200]}...")
+                prev_context_text = "\n".join(parts)
+            
             for i, output in enumerate(actor_outputs):
                 if isinstance(output, Exception):
-                    logger.error(f"智能体{execution_agents[i].name}生成失败:{output}")
+                    logger.error(f"智能体生成失败:{output}")
                     continue
+                try:
+                    output.metadata["previous_context"] = prev_context_text
+                except Exception:
+                    pass
                 valid_outputs.append(output)
             
-            logger.debug(f"生成阶段完成:{len(valid_outputs)}/{len(execution_agents)}个执行智能体成功")
+            logger.debug(f"生成阶段完成:{len(valid_outputs)} 个执行输出(含分支)")
             return valid_outputs
             
         except Exception as e:
@@ -280,10 +294,9 @@ class GameEngine:
                 for round_data in previous_rounds[-1:]:  # 最近1轮
                     previous_critiques.extend(round_data.critic_outputs)
             
-            # 为每个Actor输出分配批判者
+            # 为每个Actor输出分配批判者（避免同一agent自评）
             critique_tasks = []
             for actor_output in actor_outputs:
-                # 选择不同的智能体作为批判者（避免自我批判）
                 for critic_agent in agents:
                     if actor_output.agent_id != critic_agent.agent_id:
                         task_coroutine = self.criticizer.critique_output(
@@ -318,10 +331,10 @@ class GameEngine:
                 logger.warning("没有Actor输出可供评估")
                 return []
             
-            # 准备评估内容
+            # 准备评估内容(按 target_output_id 唯一标识包含分支)
             contents = []
             for output in actor_outputs:
-                contents.append((output.content, output.target_output_id if hasattr(output, 'target_output_id') else f"{output.agent_id}_{output.iteration}"))
+                contents.append((output.content, output.target_output_id))
             
             # 批量评估创新性
             philoss_outputs = await self.philoss_checker.batch_evaluate(contents)
@@ -440,15 +453,7 @@ class GameEngine:
         """生成最终博弈结果"""
         try:
             if not session.rounds:
-                return GameResult(
-                    task_id=session.task.task_id,
-                    success=False,
-                    final_outputs=[],
-                    total_iterations=0,
-                    convergence_achieved=False,
-                    quality_metrics={},
-                    metadata={'error': '没有有效轮次'}
-                )
+                raise RuntimeError("没有有效轮次")
             
             # 获取最后一轮的最佳输出
             last_round = session.rounds[-1]
@@ -456,20 +461,43 @@ class GameEngine:
             
             # 选择质量最高的Actor输出
             if last_round.actor_outputs:
-                # 根据对应的批判评分排序
+                # 以三种分数的均值作为当前选择策略
                 scored_outputs = []
+                # 构建映射: target_output_id -> (critical_overall, satisfaction, novelty)
+                score_map: Dict[str, Tuple[float,float,float]] = {}
+                for co in last_round.critic_outputs:
+                    score_map.setdefault(co.target_output_id, [0.0, 0.0, 0.0])
+                    score_map[co.target_output_id][0] = max(score_map[co.target_output_id][0], co.overall_score)
+                    score_map[co.target_output_id][1] = max(score_map[co.target_output_id][1], co.satisfaction_score)
+                for po in last_round.philoss_outputs:
+                    score_map.setdefault(po.target_content_id, [0.0, 0.0, 0.0])
+                    score_map[po.target_content_id][2] = max(score_map[po.target_content_id][2], po.novelty_score)
+
                 for actor_output in last_round.actor_outputs:
-                    # 找到对应的批判评分
-                    best_score = 0.0
-                    for critic_output in last_round.critic_outputs:
-                        if critic_output.target_output_id.startswith(actor_output.agent_id):
-                            best_score = max(best_score, critic_output.overall_score)
-                    
-                    scored_outputs.append((actor_output, best_score))
-                
-                # 按评分排序,取最佳结果
+                    triple = score_map.get(actor_output.target_output_id, [0.0,0.0,0.0])
+                    avg_score = sum(triple) / 3.0
+                    scored_outputs.append((actor_output, avg_score, tuple(triple)))
+
+                # 记录帕累托前沿：三维(critical,satisfaction,novelty)的非支配解
+                pareto = []
+                triples = [(ao, triple) for ao, _, triple in scored_outputs]
+                for i, (ao_i, t_i) in enumerate(triples):
+                    dominated = False
+                    for j, (ao_j, t_j) in enumerate(triples):
+                        if i == j:
+                            continue
+                        if (t_j[0] >= t_i[0] and t_j[1] >= t_i[1] and t_j[2] >= t_i[2]) and (t_j != t_i):
+                            dominated = True
+                            break
+                    if not dominated:
+                        pareto.append({
+                            'target_output_id': ao_i.target_output_id,
+                            'scores': {'critical': t_i[0], 'satisfaction': t_i[1], 'novel': t_i[2]}
+                        })
+
+                # 按平均分排序，作为当前偏好策略
                 scored_outputs.sort(key=lambda x: x[1], reverse=True)
-                final_outputs = [output for output, score in scored_outputs]
+                final_outputs = [output for output, _, _ in scored_outputs]
             
             # 计算质量指标
             quality_metrics = self._calculate_quality_metrics(session.rounds)
@@ -480,31 +508,34 @@ class GameEngine:
                 quality_metrics.get('final_novelty_score', 0) >= self.config.philoss.novelty_threshold
             )
             
-            return GameResult(
-                task_id=session.task.task_id,
+            result = GameResult(
+                actor_output=final_outputs[0] if final_outputs else None,
+                critic_scores={},
+                novel_score=None,
+                iteration_count=len(session.rounds),
+                final_consensus="基于三分均值与帕累托前沿选优",
+                phase=PHASE_COMPLETED,
                 success=success,
-                final_outputs=final_outputs,
-                total_iterations=len(session.rounds),
-                convergence_achieved=quality_metrics.get('convergence_achieved', False),
-                quality_metrics=quality_metrics,
-                metadata={
-                    'session_id': session.session_id,
-                    'total_time': session.total_time,
-                    'agent_count': len(session.agents),
-                    'final_phase': session.status
-                }
+                error_message="" if success else "质量或新颖性不达标",
+                execution_time=session.total_time,
             )
-            
+            # 将帕累托前沿写入 metadata
+            if session.rounds:
+                last_round.metadata['pareto_front'] = pareto if 'pareto' in locals() else []
+            return result
+         
         except Exception as e:
             logger.error(f"最终结果生成失败:{e}")
             return GameResult(
-                task_id=session.task.task_id,
+                actor_output=None,
+                critic_scores={},
+                novel_score=None,
+                iteration_count=len(session.rounds) if session.rounds else 0,
+                final_consensus="异常",
+                phase=PHASE_FAILED,
                 success=False,
-                final_outputs=[],
-                total_iterations=len(session.rounds) if session.rounds else 0,
-                convergence_achieved=False,
-                quality_metrics={},
-                metadata={'error': str(e)}
+                error_message=str(e),
+                execution_time=0.0,
             )
     
     def _calculate_quality_metrics(self, rounds: List[GameRound]) -> Dict[str, Any]:

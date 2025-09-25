@@ -109,60 +109,64 @@ class DynamicDispatcher:
         return reachable_agents
     
     def _analyze_next_phase_requirements(self, 
-                                        task_output: Any,
-                                        source_agent: Agent,
-                                        task: Task,
-                                        game_result: Optional[GameResult] = None) -> Dict[str, Any]:
-        """分析下一阶段的需求(完全基于上下文与输出内容,移除固定角色枚举)"""  #
+                                         task_output: Any,
+                                         source_agent: Agent,
+                                         task: Task,
+                                         game_result: Optional[GameResult] = None) -> Dict[str, Any]:
+        """分析下一阶段的需求"""
         requirements = {
             "required_skills": [],
             "output_type": "analysis",
             "priority": "medium",
             "collaboration_type": "sequential"
-        }  #
-
-        # 基于输出内容识别阶段类型  #
-        text = (str(task_output) + " " + " ".join(source_agent.responsibilities) + " " + " ".join(source_agent.skills)).lower()  #
-        def has_any(keys: list) -> bool:
-            return any(k in text for k in keys)  #
-
-        if has_any(["设计", "方案", "architecture", "design"]):
+        }
+        
+        # 基于源智能体角色分析需求
+        if source_agent.role == "产品经理":
             requirements.update({
+                "required_skills": ["技术实现", "设计创作"],
                 "output_type": "implementation",
-                "required_skills": ["技术实现", "技术评估", "协作沟通"],
                 "priority": "high",
                 "collaboration_type": "parallel"
-            })  #
-        if has_any(["代码", "实现", "coding", "开发"]):
+            })
+        elif source_agent.role == "程序员":
             requirements.update({
+                "required_skills": ["质量验证", "测试分析"],
                 "output_type": "validation",
-                "required_skills": requirements["required_skills"] + ["测试验证", "质量保证"],
                 "priority": "high",
-                "collaboration_type": requirements.get("collaboration_type", "sequential")
-            })  #
-        if has_any(["测试", "验证", "qa", "评审"]):
+                "collaboration_type": "sequential"
+            })
+        elif source_agent.role == "美工":
             requirements.update({
+                "required_skills": ["产品评审", "技术集成"],
                 "output_type": "integration",
-                "required_skills": requirements["required_skills"] + ["问题修复", "优化改进"],
                 "priority": "medium",
                 "collaboration_type": "feedback"
-            })  #
-
-        # 若未识别到任何阶段特征,回退为分析阶段  #
-        if not requirements["required_skills"]:
-            requirements["required_skills"] = ["需求分析", "数据分析", "方案评估"]  #
-            requirements["output_type"] = "analysis"  #
-
-        # 基于博弈结果对创新性不足场景进行加权  #
-        if game_result and getattr(game_result, "novel_score", None):
-            try:
-                if game_result.novel_score.score < 0.5:
-                    requirements["required_skills"].append("创新改进")  #
-                    requirements["priority"] = "high"  #
-            except Exception:
-                pass  #
-
-        return requirements  #
+            })
+        elif source_agent.role == "研究员":
+            requirements.update({
+                "required_skills": ["数据分析", "文献验证"],
+                "output_type": "analysis",
+                "priority": "high",
+                "collaboration_type": "parallel"
+            })
+        
+        # 基于任务输出内容调整需求
+        output_str = str(task_output).lower()
+        if "设计" in output_str or "方案" in output_str:
+            requirements["required_skills"].extend(["实现能力", "技术评估"])
+        elif "代码" in output_str or "实现" in output_str:
+            requirements["required_skills"].extend(["测试验证", "质量保证"])
+        elif "测试" in output_str or "验证" in output_str:
+            requirements["required_skills"].extend(["问题修复", "优化改进"])
+        
+        # 基于博弈结果调整需求
+        if game_result and game_result.novel_score:
+            if game_result.novel_score.score < 0.5:
+                requirements["required_skills"].append("创新改进")
+                requirements["priority"] = "high"
+        
+        return requirements
     
     def _select_target_agents(self, 
                               reachable_agents: List[Agent],
@@ -241,9 +245,9 @@ class DynamicDispatcher:
                 if self._skills_match(required_skill, agent_skill):
                     score += 0.3
         
-        # 基于角色适配性(动态)计算分数
-        role_score = self._calculate_role_compatibility_dynamic(agent, requirements)  #
-        score += role_score  #
+        # 基于角色适配性计算分数
+        role_score = self._calculate_role_compatibility(agent.role, requirements)
+        score += role_score
         
         # 基于历史协作效果调整分数
         history_score = self._calculate_collaboration_history_score(agent.agent_id)
@@ -273,44 +277,18 @@ class DynamicDispatcher:
         return any(keyword in agent_skill_lower for keyword in required_keywords)
     
     def _calculate_role_compatibility(self, role: str, requirements: Dict[str, Any]) -> float:
-        """兼容保留: 固定映射已移除,等待下一步由LLM动态给出(当前返回0.5)"""  #
-        return 0.5  #
-
-    def _calculate_role_compatibility_dynamic(self, agent: Agent, requirements: Dict[str, Any]) -> float:
-        """计算角色兼容性分数(动态): 基于职责与技能与所需能力的匹配度"""  #
-        required_skills = requirements.get("required_skills", [])  #
-        if not required_skills:
-            return 0.5  #
-
-        # 技能匹配分  #
-        skill_hits = 0
-        for rs in required_skills:
-            for s in agent.skills:
-                if self._skills_match(rs, s):
-                    skill_hits += 1
-                    break
-
-        # 职责相关分  #
-        duty_hits = 0
-        for rs in required_skills:
-            for r in agent.responsibilities:
-                if self._skills_match(rs, r):
-                    duty_hits += 1
-                    break
-
-        total_possible = max(1, len(required_skills) * 2)
-        compat = (skill_hits + duty_hits) / total_possible  #
-
-        # 输出类型微调  #
+        """计算角色兼容性分数"""
+        role_compatibility = {
+            "产品经理": {"analysis": 0.8, "implementation": 0.6, "validation": 0.7, "integration": 0.9},
+            "程序员": {"analysis": 0.6, "implementation": 0.9, "validation": 0.7, "integration": 0.8},
+            "美工": {"analysis": 0.5, "implementation": 0.7, "validation": 0.4, "integration": 0.6},
+            "测试人员": {"analysis": 0.7, "implementation": 0.3, "validation": 0.9, "integration": 0.5},
+            "研究员": {"analysis": 0.9, "implementation": 0.5, "validation": 0.6, "integration": 0.7},
+            "数据分析师": {"analysis": 0.9, "implementation": 0.6, "validation": 0.8, "integration": 0.5}
+        }
+        
         output_type = requirements.get("output_type", "analysis")
-        if output_type == "implementation" and any(self._skills_match("实现", s) for s in agent.skills):
-            compat += 0.1
-        if output_type == "validation" and any(self._skills_match("测试", s) for s in agent.skills):
-            compat += 0.1
-        if output_type == "integration" and any(self._skills_match("集成", s) for s in agent.skills):
-            compat += 0.1
-
-        return max(0.0, min(1.0, compat))  #
+        return role_compatibility.get(role, {}).get(output_type, 0.5)
     
     def _calculate_collaboration_history_score(self, agent_id: str) -> float:
         """计算协作历史分数"""
@@ -341,10 +319,9 @@ class DynamicDispatcher:
         return 1.0 - (workload_ratio * 0.3)  # 最多降低30%的分数
     
     def _is_coordinator_role(self, role: str) -> bool:
-        """判断是否为协调者角色(移除固定枚举,使用通用启发式)"""  #
-        role = (role or "").lower()  #
-        keywords = ["经理", "lead", "负责人", "主管", "coordinator", "architect", "owner"]  #
-        return any(k in role for k in keywords)  #
+        """判断是否为协调者角色"""
+        coordinator_roles = ["产品经理", "项目经理", "研究员", "主管", "负责人"]
+        return role in coordinator_roles
     
     def _generate_dispatch_message(self, 
                                    source_agent: Agent,

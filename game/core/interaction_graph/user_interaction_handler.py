@@ -301,8 +301,8 @@ class UserInteractionHandler:
             except Exception as e:
                 logger.warning(f"LLM生成响应失败,使用基于角色信息的动态响应: {e}")
         
-        # 降级: 使用结构化的角色响应生成，统一风格并避免重复
-        return self._generate_role_based_response(user_input, first_executor)
+        # 降级: 基于角色信息的动态响应(去模板化)
+        return f"这里因为naga_conversation为空，返回模板结论与推导: 基于{first_executor.role}的专业能力,针对'{user_input}'给出最简必要的结论与关键推导."
     
     def _generate_role_based_response(self, user_input: str, executor: Agent) -> str:
         """基于角色信息生成动态响应（更聚焦,避免空话）"""

@@ -364,3 +364,4 @@ class RoleGenerator:
             logger.warning(f"LLM优先级推断失败，使用默认值: {e}")
         
         return 5 
+ 

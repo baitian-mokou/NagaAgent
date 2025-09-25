@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 class ActorOutput:
     """Actor 组件的标准输出结构"""
     agent_id: str
+    branch_id: int
     content: str
     generation_time: float
     iteration: int
@@ -29,7 +30,7 @@ class ActorOutput:
     @property
     def target_output_id(self) -> str:
         """为下游组件提供稳定的内容标识"""
-        return f"{self.agent_id}_{self.iteration}"
+        return f"{self.agent_id}_b{self.branch_id}_{self.iteration}"
 
 
 class GameActor:
@@ -57,6 +58,7 @@ class GameActor:
         task: Task,
         context: Optional[str],
         previous_outputs: Optional[List[ActorOutput]] = None,
+        branch_id: int = 1,
     ) -> ActorOutput:
         """为指定智能体生成本轮内容
 
@@ -65,6 +67,7 @@ class GameActor:
             task: 当前任务
             context: 上一轮/外部上下文
             previous_outputs: 以往轮次的 Actor 输出,用于参考
+            branch_id: 并行分支编号（从1开始）
         """
         start_time = time.time()
         iteration = getattr(agent, "current_iteration", 0) + 1
@@ -82,18 +85,30 @@ class GameActor:
                 )
 
             generation_time = time.time() - start_time
+
+            # 汇总历史上下文（不包含本次最新输出）
+            prev_ctx_parts: List[str] = []
+            for prev in (previous_outputs or [])[-3:]:
+                prev_ctx_parts.append(
+                    f"[第{prev.iteration}轮 by {prev.metadata.get('agent_name','未知')}] {prev.content[:400]}"
+                )
+            previous_context = "\n".join(prev_ctx_parts)
+
             output = ActorOutput(
                 agent_id=agent.agent_id,
+                branch_id=branch_id,
                 content=content.strip(),
                 generation_time=generation_time,
                 iteration=iteration,
                 metadata={
                     "agent_name": agent.name,
                     "agent_role": agent.role,
+                    "actor_system_prompt": agent.system_prompt,
                     "domain": task.domain,
                     "task_id": task.task_id,
                     "context_used": bool(context),
                     "previous_output_refs": len(previous_outputs or []),
+                    "branch_id": branch_id,
                 },
             )
 
@@ -101,7 +116,7 @@ class GameActor:
             agent.current_iteration = iteration
 
             logger.info(
-                f"Actor完成生成: {agent.name} 第{iteration}轮, 耗时{generation_time:.2f}s, 输出长度{len(output.content)}"
+                f"Actor完成生成: {agent.name} 第{iteration}轮 分支#{branch_id}, 耗时{generation_time:.2f}s, 输出长度{len(output.content)}"
             )
             return output
 
@@ -110,14 +125,17 @@ class GameActor:
             generation_time = time.time() - start_time
             return ActorOutput(
                 agent_id=agent.agent_id,
+                branch_id=branch_id,
                 content=f"生成失败: {str(e)}",
                 generation_time=generation_time,
                 iteration=iteration,
                 metadata={
                     "agent_name": agent.name,
                     "agent_role": agent.role,
+                    "actor_system_prompt": agent.system_prompt if hasattr(agent, 'system_prompt') else "",
                     "error": True,
                     "error_message": str(e),
+                    "branch_id": branch_id,
                 },
             )
 
