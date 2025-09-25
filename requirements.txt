@@ -21,8 +21,8 @@ librosa
 # httpx>=0.28.1     # 已通过 nagaagent_core.vendors.httpx 提供 #
  
 
-# GUI界面相关依赖（PyQt5 已从 core 代理中剥离，改为直接依赖）
-# PyQt5>=5.15.10  # Qt GUI - 已通过 nagaagent_core.vendors.PyQt5 提供 #
+# GUI界面相关依赖（显式安装，避免首次运行缺失）
+PyQt5>=5.15.10  # Qt GUI #
 
 # 系统控制可选依赖（音量/亮度）
 pycaw>=20240210  # 音量控制（Windows） #
@@ -59,3 +59,7 @@ opensimplex>=0.4.5.1
 # 搜索工具依赖（crawl4ai 需要编译依赖 madoka，Windows/py3.13 下可能失败，先标记为可选）
 langchain-community>=0.3.29
 # crawl4ai  # 可选：需要安装 Microsoft C++ Build Tools 后再启用 #
+ 
+# 可选Agent所需依赖（按需内置，避免运行时缺包）
+playwright>=1.52.0  # 浏览器自动化Agent #
+bilibili-api-python  # Bilibili 视频Agent #
