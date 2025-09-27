@@ -1,7 +1,7 @@
 # agent_bilibili_video.py # B站视频信息获取Agent
 import json # 导入json模块
 import asyncio
-from agents import Agent, ComputerTool # 导入Agent和工具基类
+from nagaagent_core.vendors.agents import Agent, ComputerTool # 统一代理 #
 from system.config import config, AI_NAME # 导入配置
 
 # 导入bilibili-api-python库
