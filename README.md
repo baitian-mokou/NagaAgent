@@ -1,13 +1,16 @@
-# NagaAgent 3.1
+# NagaAgent 4.0
 
-![NagaAgent Logo](https://img.shields.io/badge/NagaAgent-3.1-blue?style=for-the-badge&logo=python&logoColor=white)
+![NagaAgent Logo](https://img.shields.io/badge/NagaAgent-4.0-blue?style=for-the-badge&logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-green?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)
 ![Status](https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge)
 
 ![Star History](https://img.shields.io/github/stars/Xxiii8322766509/NagaAgent?style=social)![Forks](https://img.shields.io/github/forks/Xxiii8322766509/NagaAgent?style=social)![Issues](https://img.shields.io/github/issues/Xxiii8322766509/NagaAgent)![Pull Requests](https://img.shields.io/github/issues-pr/Xxiii8322766509/NagaAgent)
+![UI 预览](ui/img/README.jpg)
+---
 
+快速入门视频：[https://www.pylindex.top/naga/intro.mp4](https://www.pylindex.top/naga/intro.mp4)
 ---
 
 快速入门视频：[https://www.pylindex.top/naga/intro.mp4](https://www.pylindex.top/naga/intro.mp4)
@@ -49,6 +52,36 @@
 
 ### 🔧 一键安装
 
+#### 📦 依赖管理工具
+
+NagaAgent 4.0 提供了强大的依赖管理工具，支持：
+
+- **🔍 自动扫描**: 扫描项目所有依赖文件，包括主依赖和各子模块依赖
+- **📊 依赖分析**: 按类别组织依赖（核心、GUI、语音、AI、网络、系统控制等）
+- **✅ 状态检测**: 自动检测已安装和缺失的依赖
+- **🛠️ 一键安装**: 生成PowerShell安装脚本和合并的requirements文件
+- **⚠️ 冲突检测**: 检测依赖版本冲突和兼容性问题
+
+**使用方法：**
+```bash
+# 运行依赖管理工具
+python dependency_manager.py
+
+# 查看依赖状态
+python dependency_manager.py --check
+
+# 生成安装脚本
+python dependency_manager.py --generate-script
+
+# 验证依赖安装
+python dependency_manager.py --validate
+```
+
+**生成的文件：**
+- `install_dependencies.ps1` - PowerShell一键安装脚本
+- `requirements_merged.txt` - 合并的依赖文件
+- `requirements_clean.txt` - 清理后的依赖文件
+
 <details>
 <summary><strong>Windows 用户</strong></summary>
 
@@ -57,7 +90,10 @@
 git clone https://github.com/Xxiii8322766509/NagaAgent.git
 cd NagaAgent
 
-# 一键配置
+# 使用依赖管理工具
+python dependency_manager.py
+
+# 或使用一键配置
 .\setup.ps1
 ```
 </details>
@@ -172,7 +208,7 @@ NagaAgent/
 ├── 📁 system/                 # 系统核心模块
 │   ├── system_checker.py      # 系统环境检测器
 │   ├── config_manager.py      # 配置管理器
-│   └── conversation_core.py   # 对话核心引擎
+│   └── (已迁移到apiserver)   # 对话核心引擎
 ├── 📁 ui/                     # 用户界面模块
 │   ├── live2d/                # Live2D集成模块
 │   │   ├── renderer.py        # Live2D渲染器
@@ -202,8 +238,8 @@ NagaAgent/
 │   ├── quintuple_extractor.py # 五元组提取器
 │   └── graph.py               # 图数据库操作
 ├── 📁 logs/                   # 日志和存储
-│   ├── knowledge_graph/       # 知识图谱数据
-│   └── prompts/               # 提示词存储
+│   └── knowledge_graph/       # 知识图谱数据
+├── 📁 system/prompts/         # 提示词存储（已迁移到system目录，管理功能集成到config.py）
 ├── 📁 mqtt_tool/              # MQTT通信工具
 ├── 📁 ui/tray/                # 系统托盘模块
 └── 📄 main.py                 # 主程序入口
@@ -455,7 +491,7 @@ restore_config_snapshot(snapshot)
   "live2d": {
     "enabled": true,
     "model_path": "path/to/your/model.model3.json",
-    "fallback_image": "ui/standby.png"
+    "fallback_image": "ui/img/standby.png"
   }
 }
 ```
@@ -491,12 +527,69 @@ ui/live2d/
 
 ## 🌟 核心功能
 
-### 🧠 智能对话系统
-- **多模型支持**: 兼容 OpenAI、DeepSeek、Anthropic 等主流 LLM 提供商
-- **上下文记忆**: 智能维护对话历史，支持多轮对话上下文
-- **流式输出**: 实时显示 AI 回复，提升交互体验
-- **工具调用**: 自动解析和执行 LLM 返回的工具调用指令
-- **深度思考**: 基于遗传算法的多分支思考引擎，提供更高质量的回答
+### 🧠 Server架构与并行启动
+
+四项 Server 职责清晰、并行启动、相互解耦但有序协作：
+
+1) API Server（FastAPI，默认 8000）
+   - 职责：
+     - 对外 REST API 与流式 SSE 接口
+     - 使用 `streaming_tool_extractor` 仅做句子级切割并投递给语音侧（前端直接 append 增量，不再接收分句事件）
+     - 会话管理与日志记录（`message_manager`）
+     - 不向 `naga_system_prompt` 注入 MCP 服务清单，主对话流程保持纯净
+   - 关键接口（示例）：
+     - `/chat` 普通对话；`/chat/stream` 流式对话（直接下发 `content` 增量）
+     - `/health`、`/system/info`（含可用 MCP 服务统计）
+     - 会话管理：`/sessions`、`/sessions/{id}`、`DELETE /sessions*`
+   - 相关实现：`apiserver/api_server.py`
+
+2) Agent Server（FastAPI，默认 8001）
+   - 职责：
+     - 意图识别与任务编排中枢（后台异步触发，不阻塞前台对话）
+     - 运行 MCP 工具调用循环：`_run_intent_mcp_loop(session_id, messages, initial_analysis, max_iterations=2)`
+       - 解析意图识别产出的 `tool_calls`
+       - 逐条调度至 MCP（见 MCP Server），结果回灌到上下文，再次迭代识别
+     - 电脑控制、能力刷新、任务列表与状态查询等（基于博弈论的调度器）
+   - 关键接口（示例）：`/tasks`、`/tasks/{id}`、`/capabilities`、`/mcp/availability`、`/computer-use/*`
+   - 相关实现：`agentserver/agent_server.py`、`agentserver/task_scheduler.py`
+   - 任务调度器用法示例：
+     ```python
+     from agentserver.task_scheduler import get_task_scheduler
+
+     scheduler = get_task_scheduler()
+     tasks = [
+         {"type": "processor", "params": {"query": "示例任务A"}},
+         {"type": "processor", "params": {"query": "示例任务B"}},
+     ]
+     results = await scheduler.schedule_parallel_execution(tasks)
+
+     # 统计（与 agentserver/agent_manager.py 的 get_execution_stats 对齐）
+     total = len(scheduler.task_registry)
+     running = len([t for t in scheduler.task_registry.values() if t.get("status") == "running"])
+     queued = len([t for t in scheduler.task_registry.values() if t.get("status") == "queued"])
+     ```
+   - 迁移提示：原 `apiserver.task_scheduler` 已统一为 `agentserver.task_scheduler`
+
+3) MCP Server（FastAPI，默认 8003）
+   - 职责：
+     - 唯一 MCP 工具执行通道与调度层
+     - 通过 `mcp_scheduler` → `mcp_manager.unified_call(service, tool, args)` 执行单次工具调用
+     - 以 `mcp_registry` 为唯一能力元数据来源，已移除冗余 `MCPCapabilityManager` 与重复执行入口
+   - 特性：
+     - 支持服务/工具列表、统计、能力查询（详见 `mcpserver/mcp_server.py` 暴露的 API）
+     - 与 Agent Server 紧密协同：Agent 的工具调用循环通过此处统一落地执行
+   - 相关实现：`mcpserver/mcp_server.py`、`mcpserver/mcp_scheduler.py`、`mcpserver/mcp_manager.py`、`mcpserver/mcp_registry.py`
+
+4) TTS Server（HTTP，端口见 `config.tts.port`）
+   - 职责：
+     - 独立语音输出服务，只关心句子级文本输入与合成播放
+     - 与 API Server 的分工：API 侧负责切句并投递，TTS 负责音频生成与播放，二者完全解耦
+   - 相关实现：`voice/output/start_voice_service.py`、`voice/output/voice_integration.py`
+
+并行启动与端口占用回退：
+- 在 `main.py` 中通过 `ServiceManager.start_all_servers()` 并行拉起 API/Agent/MCP/TTS 四个服务；
+- 自动检测端口占用，已占用即跳过并打印提示，不阻塞其它服务启动；
+- 线程方式后台运行，显著缩短整体启动耗时。
 
 ### 🔍 在线搜索系统
 - **SearXNG集成**: 基于 SearXNG 的隐私保护搜索引擎
@@ -512,23 +605,11 @@ ui/live2d/
 - **配置快照**: 安全的配置保存和恢复功能
 - **错误处理**: 完善的异常处理机制，确保系统稳定性
 
-### 🔧 MCP 服务生态
-- **动态服务发现**: 自动扫描和注册所有 MCP 服务
-- **即插即用**: 新增服务无需重启系统
-- **服务管理**: 统一的服务池查询和管理接口
-- **多服务协作**: 支持多个 Agent 协同工作
-
 ### 🗺️ GRAG 知识图谱
 - **五元组提取**: 自动从对话中提取实体-关系-属性
 - **智能检索**: 基于相似度的上下文召回机制
 - **可视化展示**: 支持知识图谱的可视化展示
 - **历史导入**: 兼容旧版对话记录的批量导入
-
-### 🎤 语音交互系统
-- **流式合成**: 基于 Edge-TTS 的实时语音合成
-- **智能分句**: 自动识别句子边界，优化播放体验
-- **异步处理**: 文本显示和音频播放完全分离
-- **多引擎支持**: 兼容多种 TTS 引擎
 
 ### 🖥️ 用户界面
 - **现代化 GUI**: 基于 PyQt5 的精美图形界面
@@ -541,25 +622,11 @@ ui/live2d/
 - **响应式设计**: 自适应不同屏幕尺寸
 - **流式更新**: 实时流式消息更新和自动滚动
 
-### 🌐 API 服务
-- **RESTful API**: 完整的 HTTP API 接口
-- **流式支持**: Server-Sent Events 流式输出
-- **自动文档**: 交互式 API 文档 (Swagger)
-- **跨域支持**: 完整的 CORS 配置
-
 ### 📱 系统托盘
 - **后台运行**: 支持最小化到系统托盘
 - **自动隐藏**: 启动后自动隐藏控制台窗口
 - **快捷操作**: 托盘图标右键菜单
 - **自启动**: 支持注册表方式的自启动功能
-
-### 🔍 智能 Agent 系统
-- **AgentManager**: 独立的 Agent 注册和调用系统
-- **配置管理**: 统一的 Agent 配置和动态加载
-- **会话隔离**: 多用户会话完全隔离和TTL管理
-- **占位符替换**: 支持Agent配置、环境变量、时间信息等占位符
-- **生命周期管理**: 完整的 Agent 生命周期管理和热插拔
-- **多Agent协作**: 支持多个 Agent 协同工作和任务分配
 
 ---
 
@@ -619,7 +686,7 @@ NagaAgent3.1/
 ├── config.py                   # 全局配置
 ├── config.json.example         # 配置文件模板
 ├── config_manager.py           # 配置热更新管理器
-├── conversation_core.py        # 对话核心（含工具调用循环主逻辑）
+├── (已迁移到apiserver)        # 对话核心（含工具调用循环主逻辑）
 ├── apiserver/                  # API服务器模块
 │   ├── api_server.py           # FastAPI服务器
 │   ├── start_server.py         # 启动脚本
@@ -831,7 +898,7 @@ AgentManager是一个独立的Agent注册和调用系统，支持从配置文件
 
 #### 基本调用
 ```python
-from mcpserver.agent_manager import get_agent_manager
+from agentserver.core.agent_manager import get_agent_manager
 
 # 获取AgentManager实例
 agent_manager = get_agent_manager()
@@ -846,7 +913,7 @@ result = await agent_manager.call_agent(
 
 #### 便捷函数调用
 ```python
-from mcpserver.agent_manager import call_agent, list_agents, get_agent_info
+from agentserver.core.agent_manager import call_agent, list_agents, get_agent_info
 
 # 便捷调用
 result = await call_agent("ExampleAgent", "你好")
@@ -920,55 +987,10 @@ agents = list_agents()
 ### 注意事项
 1. **权限要求**: 自启动功能需要管理员权限
 2. **依赖安装**: 需要安装`PyQt5`库
-3. **图标文件**: 默认使用`ui/window_icon.png`作为托盘图标
+3. **图标文件**: 默认使用`ui/img/window_icon.png`作为托盘图标
 4. **启动方式**: 使用`start_with_tray.bat`启动以启用托盘功能
 
 ---
-
-## 🌐 RESTful API 服务
-
-NagaAgent内置完整的RESTful API服务器，启动时自动开启，支持所有对话功能：
-
-### API接口说明
-
-- **基础地址**: `http://127.0.0.1:8000` (可在config.py中配置)
-- **交互式文档**: `http://127.0.0.1:8000/docs`
-- **OpenAPI规范**: `http://127.0.0.1:8000/openapi.json`
-
-### 主要接口
-
-#### 健康检查
-```bash
-GET /health
-```
-
-#### 对话接口
-```bash
-# 普通对话
-POST /chat
-{
-  "message": "你好，娜迦",
-  "session_id": "optional-session-id"
-}
-
-# 流式对话 (Server-Sent Events)
-POST /chat/stream
-{
-  "message": "请介绍一下人工智能的发展历程"
-}
-```
-
-#### 系统管理接口
-```bash
-# 获取系统信息
-GET /system/info
-
-# 切换开发者模式
-POST /system/devmode
-
-# 获取记忆统计
-GET /memory/stats
-```
 
 ## MCP服务Agent化升级说明
 

@@ -8,7 +8,6 @@ import asyncio
 import json
 import sys
 import traceback
-import re
 import os
 import logging
 import uuid
@@ -21,13 +20,15 @@ logging.getLogger("httpcore.http11").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
 
+# 创建logger实例
+logger = logging.getLogger(__name__)
+
 from nagaagent_core.api import uvicorn
-from nagaagent_core.api import FastAPI, HTTPException, BackgroundTasks, Request, UploadFile, File, Form
+from nagaagent_core.api import FastAPI, HTTPException, Request, UploadFile, File, Form
 from nagaagent_core.api import CORSMiddleware
-from nagaagent_core.api import StreamingResponse, JSONResponse, HTMLResponse
-from nagaagent_core.api import WebSocket, WebSocketDisconnect
+from nagaagent_core.api import StreamingResponse
 from nagaagent_core.api import StaticFiles
-from nagaagent_core.vendors.pydantic import BaseModel
+from pydantic import BaseModel
 from nagaagent_core.core import aiohttp
 import shutil
 from pathlib import Path
@@ -37,20 +38,50 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 工具调用模块（仅用于流式接口）
 from .message_manager import message_manager  # 导入统一的消息管理器
-from .prompt_logger import prompt_logger  # 导入prompt日志记录器
+
+from .llm_service import get_llm_service  # 导入LLM服务
 
 # 导入配置系统
 try:
     from system.config import config, AI_NAME  # 使用新的配置系统
+    from system.config import get_prompt  # 导入提示词仓库
 except ImportError:
     import sys
     import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from system.config import config, AI_NAME  # 使用新的配置系统
-from ui.response_utils import extract_message  # 导入消息提取工具
+    from system.config import get_prompt  # 导入提示词仓库
+from ui.utils.response_util import extract_message  # 导入消息提取工具
 
-# 全局NagaAgent实例 - 延迟导入避免循环依赖
-naga_agent = None
+# conversation_core已删除，相关功能已迁移到apiserver
+
+# 统一后台意图分析触发函数
+def _trigger_background_analysis(session_id: str):
+    """统一触发后台意图分析"""  # 统一入口，避免重复代码
+    try:
+        from system.background_analyzer import get_background_analyzer  # 延迟导入，避免启动时依赖问题
+        background_analyzer = get_background_analyzer()  # 获取全局实例
+        recent_messages = message_manager.get_recent_messages(session_id, count=6)  # 获取最近对话
+        asyncio.create_task(background_analyzer.analyze_intent_async(recent_messages, session_id))  # 异步执行
+    except Exception as e:
+        print(f"后台意图分析触发失败: {e}")  # 失败不影响主流程
+
+# 统一保存对话与日志函数
+def _save_conversation_and_logs(session_id: str, user_message: str, assistant_response: str):
+    """统一保存对话历史与日志"""  # 统一入口，避免重复代码
+    try:
+        # 保存对话历史到消息管理器
+        message_manager.add_message(session_id, "user", user_message)
+        message_manager.add_message(session_id, "assistant", assistant_response)
+        
+        # 保存对话日志到文件
+        message_manager.save_conversation_log(
+            user_message, 
+            assistant_response, 
+            dev_mode=False  # 开发者模式已删除
+        )
+    except Exception as e:
+        print(f"保存对话与日志失败: {e}")  # 失败不影响主流程
 
 # 回调工厂类 - 统一管理重复的回调函数
 class CallbackFactory:
@@ -63,113 +94,39 @@ class CallbackFactory:
             """处理文本块 - 累积纯文本内容"""
             if chunk_type == "chunk":
                 pure_text_content_ref[0] += text
-                if is_streaming:
-                    return f"data: {text}\n\n"
+                # 不再向前端推送分句事件；SSE 增量由主循环直接推送
             return None
         return on_text_chunk
-    
-    @staticmethod
-    def create_sentence_callback(is_streaming=False):
-        """创建句子回调函数"""
-        def on_sentence(sentence: str, sentence_type: str):
-            """处理完整句子"""
-            if sentence_type == "sentence":
-                if is_streaming:
-                    return f"data: [SENTENCE] {sentence}\n\n"
-            return None
-        return on_sentence
-    
-    @staticmethod
-    def create_tool_call_callback(is_streaming=False):
-        """创建工具调用回调函数"""
-        def on_tool_call(tool_call: str, tool_type: str):
-            """处理工具调用 - 不累积到纯文本"""
-            if tool_type == "tool_call":
-                if is_streaming:
-                    return f"data: [TOOL_CALL] 正在执行工具调用...\n\n"
-            return None
-        return on_tool_call
-    
-    @staticmethod
-    def create_tool_result_callback(is_streaming=False):
-        """创建工具结果回调函数"""
-        def on_tool_result(result: str, result_type: str):
-            """处理工具结果 - 不累积到纯文本"""
-            if result_type == "tool_start":
-                if is_streaming:
-                    return f"data: [TOOL_START] {result}\n\n"
-            elif result_type == "tool_result":
-                if is_streaming:
-                    return f"data: [TOOL_RESULT] {result}\n\n"
-            elif result_type == "tool_error":
-                if is_streaming:
-                    return f"data: [TOOL_ERROR] {result}\n\n"
-            return None
-        return on_tool_result
     
     @classmethod
     def create_callbacks(cls, pure_text_content_ref, is_streaming=False):
         """创建完整的回调函数集合"""
         return {
-            'on_text_chunk': cls.create_text_chunk_callback(pure_text_content_ref, is_streaming),
-            'on_sentence': cls.create_sentence_callback(is_streaming),
-            'on_tool_call': cls.create_tool_call_callback(is_streaming),
-            'on_tool_result': cls.create_tool_result_callback(is_streaming)
+            'on_text_chunk': cls.create_text_chunk_callback(pure_text_content_ref, is_streaming)
         }
 
-# WebSocket连接管理
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except:
-                # 移除断开的连接
-                self.active_connections.remove(connection)
-
-manager = ConnectionManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global naga_agent
     try:
-        print("[INFO] 正在初始化NagaAgent...")
-        # 延迟导入避免循环依赖
-        from system.conversation_core import NagaConversation
-        naga_agent = NagaConversation()  # 第四次初始化：API服务器启动时创建
-        print("[SUCCESS] NagaAgent初始化完成")
+        print("[INFO] 正在初始化API服务器...")
+        # conversation_core已删除，相关功能已迁移到apiserver
+        print("[SUCCESS] API服务器初始化完成")
         yield
     except Exception as e:
-        print(f"[ERROR] NagaAgent初始化失败: {e}")
+        print(f"[ERROR] API服务器初始化失败: {e}")
         traceback.print_exc()
         sys.exit(1)
     finally:
         print("[INFO] 正在清理资源...")
-        if naga_agent and hasattr(naga_agent, 'mcp'):
-            try:
-                await naga_agent.mcp.cleanup()
-            except Exception as e:
-                print(f"[WARNING] 清理MCP资源时出错: {e}")
+        # MCP服务现在由mcpserver独立管理，无需清理
 
 # 创建FastAPI应用
 app = FastAPI(
     title="NagaAgent API",
     description="智能对话助手API服务",
-    version="3.0",
+    version="4.0.0",
     lifespan=lifespan
 )
 
@@ -192,16 +149,15 @@ class ChatRequest(BaseModel):
     stream: bool = False
     session_id: Optional[str] = None
     use_self_game: bool = False
+    disable_tts: bool = False  # V17: 支持禁用服务器端TTS
+    return_audio: bool = False  # V19: 支持返回音频URL供客户端播放
 
 class ChatResponse(BaseModel):
     response: str
     session_id: Optional[str] = None
     status: str = "success"
 
-class MCPRequest(BaseModel):
-    service_name: str
-    task: Dict
-    session_id: Optional[str] = None
+
 
 class SystemInfoResponse(BaseModel):
     version: str
@@ -223,40 +179,6 @@ class DocumentProcessRequest(BaseModel):
     action: str = "read"  # read, analyze, summarize
     session_id: Optional[str] = None
 
-# WebSocket路由
-@app.websocket("/ws/mcplog")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket端点 - 提供MCP实时通知"""
-    await manager.connect(websocket)
-    try:
-        # 发送连接确认
-        await manager.send_personal_message(
-            json.dumps({
-                "type": "connection_ack",
-                "message": "WebSocket连接成功"
-            }, ensure_ascii=False),
-            websocket
-        )
-        
-        # 保持连接
-        while True:
-            try:
-                # 等待客户端消息（心跳检测）
-                data = await websocket.receive_text()
-                # 可以处理客户端发送的消息
-                await manager.send_personal_message(
-                    json.dumps({
-                        "type": "pong",
-                        "message": "收到心跳"
-                    }, ensure_ascii=False),
-                    websocket
-                )
-            except WebSocketDisconnect:
-                manager.disconnect(websocket)
-                break
-    except Exception as e:
-        print(f"WebSocket错误: {e}")
-        manager.disconnect(websocket)
 
 # API路由
 @app.get("/", response_model=Dict[str, str])
@@ -264,10 +186,9 @@ async def root():
     """API根路径"""
     return {
         "name": "NagaAgent API",
-        "version": "3.0",
+        "version": "4.0.0",
         "status": "running",
         "docs": "/docs",
-        "websocket": "/ws/mcplog"
     }
 
 @app.get("/health")
@@ -275,28 +196,24 @@ async def health_check():
     """健康检查"""
     return {
         "status": "healthy",
-        "agent_ready": naga_agent is not None,
+        "agent_ready": True,
         "timestamp": str(asyncio.get_event_loop().time())
     }
 
 @app.get("/system/info", response_model=SystemInfoResponse)
 async def get_system_info():
     """获取系统信息"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
     
     return SystemInfoResponse(
-        version="3.0",
+        version="4.0.0",
         status="running",
-        available_services=naga_agent.mcp.list_mcps(),
+        available_services=[],  # MCP服务现在由mcpserver独立管理
         api_key_configured=bool(config.api.api_key and config.api.api_key != "sk-placeholder-key-not-set")
     )
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """对话接口 - 统一使用流式处理，支持工具调用"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
+    """普通对话接口 - 仅处理纯文本对话"""
     
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="消息内容不能为空")
@@ -333,35 +250,24 @@ async def chat(request: ChatRequest):
         # 获取或创建会话ID
         session_id = message_manager.create_session(request.session_id)
         
-        # 构建系统提示词
-        available_services = naga_agent.mcp.get_available_services_filtered()
-        services_text = naga_agent._format_services_for_prompt(available_services)
-        system_prompt = config.prompts.naga_system_prompt.format(ai_name=AI_NAME, **services_text)
+        # 构建系统提示词（拼接主提示词和对话风格）
+        main_prompt = get_prompt("naga_system_prompt", ai_name=AI_NAME)
+        style_prompt = get_prompt("conversation_style_prompt")
+        system_prompt = f"{main_prompt}\n\n{style_prompt}"
         
-        # 使用消息管理器构建完整的对话消息
+        # 使用消息管理器构建完整的对话消息（纯聊天，不触发工具）
         messages = message_manager.build_conversation_messages(
             session_id=session_id,
             system_prompt=system_prompt,
             current_message=request.message
         )
         
-        # 导入流式工具调用提取器
-        from .streaming_tool_extractor import StreamingToolCallExtractor
-        tool_extractor = StreamingToolCallExtractor(naga_agent.mcp)
-        
-        # 用于累积纯文本内容（不包含工具调用）
+        # 用于累积纯文本内容
         pure_text_content = [""]  # 使用列表引用，便于在回调中修改
         
-        # 使用回调工厂创建回调函数
-        callbacks = CallbackFactory.create_callbacks(pure_text_content, is_streaming=False)
-        
-        # 设置回调
-        tool_extractor.set_callbacks(**callbacks)
-        
         # 调用LLM API - 流式模式
-        async with aiohttp.ClientSession() as session:
-            # 保存prompt日志
-            prompt_logger.log_prompt(session_id, messages, api_status="sending")
+        timeout = aiohttp.ClientTimeout(total=120, connect=30, sock_read=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             
             async with session.post(
                 f"{config.api.base_url}/chat/completions",
@@ -378,8 +284,6 @@ async def chat(request: ChatRequest):
                 }
             ) as resp:
                 if resp.status != 200:
-                    # 保存失败的prompt日志
-                    prompt_logger.log_prompt(session_id, messages, api_status="failed")
                     error_detail = f"LLM API调用失败 (状态码: {resp.status})"
                     if resp.status == 401:
                         error_detail = "LLM API认证失败，请检查API密钥"
@@ -404,21 +308,20 @@ async def chat(request: ChatRequest):
                                 delta = data['choices'][0].get('delta', {})
                                 if 'content' in delta:
                                     content = delta['content']
-                                    # 使用流式工具调用提取器处理内容
-                                    await tool_extractor.process_text_chunk(content)
+                                    # 直接累积纯文本内容
+                                    pure_text_content[0] += content
                         except json.JSONDecodeError:
                             continue
         
-        # 完成处理
-        await tool_extractor.finish_processing()
+        # 处理完成
         
-        # 保存对话历史到消息管理器（使用纯文本内容）
-        message_manager.add_message(session_id, "user", request.message)
-        message_manager.add_message(session_id, "assistant", pure_text_content[0])
+        # 统一保存对话历史与日志
+        _save_conversation_and_logs(session_id, request.message, pure_text_content[0])
         
-        # 保存成功的prompt日志
-        prompt_logger.log_prompt(session_id, messages, {"content": pure_text_content[0]}, api_status="success")
         
+        # 异步触发后台意图分析 - 基于博弈论的背景分析机制
+        #_trigger_background_analysis(session_id)
+
         return ChatResponse(
             response=extract_message(pure_text_content[0]) if pure_text_content[0] else pure_text_content[0],
             session_id=session_id,
@@ -431,14 +334,13 @@ async def chat(request: ChatRequest):
 
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
-    """流式对话接口 - 支持流式工具调用提取"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
+    """流式对话接口 - 流式文本处理交给streaming_tool_extractor"""
     
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="消息内容不能为空")
     
     async def generate_response() -> AsyncGenerator[str, None]:
+        complete_text = ""  # V19: 用于累积完整文本以生成音频
         try:
             # 获取或创建会话ID
             session_id = message_manager.create_session(request.session_id)
@@ -446,10 +348,10 @@ async def chat_stream(request: ChatRequest):
             # 发送会话ID信息
             yield f"data: session_id: {session_id}\n\n"
             
-            # 构建系统提示词
-            available_services = naga_agent.mcp.get_available_services_filtered()
-            services_text = naga_agent._format_services_for_prompt(available_services)
-            system_prompt = config.prompts.naga_system_prompt.format(ai_name=AI_NAME, **services_text)
+            # 构建系统提示词（拼接主提示词和对话风格）
+            main_prompt = get_prompt("naga_system_prompt", ai_name=AI_NAME)
+            style_prompt = get_prompt("conversation_style_prompt")
+            system_prompt = f"{main_prompt}\n\n{style_prompt}"
             
             # 使用消息管理器构建完整的对话消息
             messages = message_manager.build_conversation_messages(
@@ -457,44 +359,82 @@ async def chat_stream(request: ChatRequest):
                 system_prompt=system_prompt,
                 current_message=request.message
             )
-            
-            # 导入流式工具调用提取器
-            from .streaming_tool_extractor import StreamingToolCallExtractor
-            tool_extractor = StreamingToolCallExtractor(naga_agent.mcp)
-            
-            # 用于累积纯文本内容（不包含工具调用）
-            pure_text_content = [""]  # 使用列表引用，便于在回调中修改
-            
-            # 初始化语音集成（如果启用）
+
+            # 流式文本处理完全交给streaming_tool_extractor
+            # apiserver不再负责累积文本内容
+
+            # 初始化语音集成（根据voice_mode和return_audio决定）
+            # V19: 如果客户端请求返回音频，则在服务器端生成
             voice_integration = None
-            if config.system.voice_enabled:
+
+            # V19: 混合模式下，如果请求return_audio，则在服务器生成音频
+            # 修复双音频问题：return_audio时不启用实时TTS，只在最后生成完整音频
+            should_enable_tts = (
+                config.system.voice_enabled
+                and not request.return_audio  # 修复：return_audio时不启用实时TTS
+                and config.voice_realtime.voice_mode != "hybrid"
+                and not request.disable_tts  # 兼容旧版本的disable_tts
+            )
+
+            if should_enable_tts:
                 try:
                     from voice.output.voice_integration import get_voice_integration
                     voice_integration = get_voice_integration()
+                    logger.info(f"[API Server] 实时语音集成已启用 (return_audio={request.return_audio}, voice_mode={config.voice_realtime.voice_mode})")
                 except Exception as e:
                     print(f"语音集成初始化失败: {e}")
-            
-            # 使用回调工厂创建回调函数
-            callbacks = CallbackFactory.create_callbacks(pure_text_content, is_streaming=True)
-            
-            # 设置回调
-            tool_extractor.set_callbacks(
-                **callbacks,
-                voice_integration=voice_integration
-            )
+            else:
+                if request.return_audio:
+                    logger.info("[API Server] return_audio模式，将在最后生成完整音频")
+                elif config.voice_realtime.voice_mode == "hybrid" and not request.return_audio:
+                    logger.info("[API Server] 混合模式下且未请求音频，不处理TTS")
+                elif request.disable_tts:
+                    logger.info("[API Server] 客户端禁用了TTS (disable_tts=True)")
+
+            # 初始化流式文本切割器（负责文本处理和TTS）
+            # 修复：始终创建tool_extractor以累积文本内容，确保日志保存
+            tool_extractor = None
+            try:
+                from .streaming_tool_extractor import StreamingToolCallExtractor
+                tool_extractor = StreamingToolCallExtractor()
+                # 只有在需要实时TTS且不是return_audio模式时，才设置voice_integration
+                if voice_integration and not request.return_audio:
+                    tool_extractor.set_callbacks(
+                        on_text_chunk=None,  # 不需要回调，直接处理TTS
+                        voice_integration=voice_integration
+                    )
+            except Exception as e:
+                print(f"流式文本切割器初始化失败: {e}")
             
             # 定义LLM调用函数 - 支持真正的流式输出
             async def call_llm_stream(messages: List[Dict]) -> AsyncGenerator[str, None]:
                 """调用LLM API - 流式模式"""
-                async with aiohttp.ClientSession() as session:
-                    # 保存prompt日志
-                    prompt_logger.log_prompt(session_id, messages, api_status="sending")
-                    
+                nonlocal complete_text  # V19: 声明使用外层函数的变量
+
+                # 增加超时配置
+                timeout = aiohttp.ClientTimeout(
+                    total=180,  # 总超时时间增加到3分钟
+                    connect=60,  # 连接超时60秒
+                    sock_read=120  # 读取超时120秒
+                )
+
+                # 配置连接器以处理长连接
+                connector = aiohttp.TCPConnector(
+                    force_close=False,
+                    keepalive_timeout=120,
+                    enable_cleanup_closed=True
+                )
+
+                async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+                    logger.info(f"[API Server] 开始流式调用LLM: {config.api.base_url}")
+
                     async with session.post(
                         f"{config.api.base_url}/chat/completions",
                         headers={
                             "Authorization": f"Bearer {config.api.api_key}",
-                            "Content-Type": "application/json"
+                            "Content-Type": "application/json",
+                            "Accept": "text/event-stream",
+                            "Connection": "keep-alive"
                         },
                         json={
                             "model": config.api.model,
@@ -505,8 +445,6 @@ async def chat_stream(request: ChatRequest):
                         }
                     ) as resp:
                         if resp.status != 200:
-                            # 保存失败的prompt日志
-                            prompt_logger.log_prompt(session_id, messages, api_status="failed")
                             error_detail = f"LLM API调用失败 (状态码: {resp.status})"
                             if resp.status == 401:
                                 error_detail = "LLM API认证失败，请检查API密钥"
@@ -516,46 +454,122 @@ async def chat_stream(request: ChatRequest):
                                 error_detail = "LLM API请求过于频繁，请稍后重试"
                             elif resp.status >= 500:
                                 error_detail = f"LLM API服务器错误 (状态码: {resp.status})"
+                            logger.error(f"[API Server] 流式响应失败，状态码: {resp.status}")
                             raise HTTPException(status_code=resp.status, detail=error_detail)
-                        
-                        # 处理流式响应
-                        async for line in resp.content:
-                            line_str = line.decode('utf-8').strip()
-                            if line_str.startswith('data: '):
-                                data_str = line_str[6:]
-                                if data_str == '[DONE]':
+
+                        logger.info(f"[API Server] LLM流式响应开始，状态码: {resp.status}")
+
+                        # 处理流式响应，增加错误恢复机制
+                        buffer = ""
+                        try:
+                            async for chunk in resp.content.iter_chunked(1024):  # 使用固定大小的块
+                                if not chunk:
                                     break
+                                logger.info(f"[API Server] LLM流式处理中: {chunk}")
+
                                 try:
-                                    data = json.loads(data_str)
-                                    if 'choices' in data and len(data['choices']) > 0:
-                                        delta = data['choices'][0].get('delta', {})
-                                        if 'content' in delta:
-                                            content = delta['content']
-                                            # 使用流式工具调用提取器处理内容
-                                            results = await tool_extractor.process_text_chunk(content)
-                                            if results:
-                                                for result in results:
-                                                    yield result
-                                            
-                                except json.JSONDecodeError:
+                                    # 解码并处理数据
+                                    data = chunk.decode('utf-8')
+                                    buffer += data
+
+                                    # 按行分割处理
+                                    lines = buffer.split('\n')
+                                    buffer = lines[-1]  # 保留最后一个可能不完整的行
+
+                                    for line in lines[:-1]:
+                                        line_str = line.strip()
+                                        if line_str.startswith('data: '):
+                                            data_str = line_str[6:]
+                                            if data_str == '[DONE]':
+                                                break
+                                            try:
+                                                data = json.loads(data_str)
+                                                if 'choices' in data and len(data['choices']) > 0:
+                                                    delta = data['choices'][0].get('delta', {})
+                                                    if 'content' in delta:
+                                                        import base64
+                                                        content = delta['content']
+                                                        b64 = base64.b64encode(content.encode('utf-8')).decode('ascii')
+                                                        yield f"data: {b64}\n\n"
+
+                                                        # V19: 如果需要返回音频，累积文本
+                                                        if request.return_audio:
+                                                            complete_text += content
+
+                                                        # 发送到流式文本切割器进行文本处理
+                                                        # 修复：始终发送到tool_extractor以累积完整文本
+                                                        if tool_extractor:
+                                                            try:
+                                                                await tool_extractor.process_text_chunk(content)
+                                                            except Exception as e:
+                                                                logger.error(f"[API Server] 流式文本切割器处理错误: {e}")
+
+                                            except json.JSONDecodeError as je:
+                                                logger.warning(f"[API Server] JSON解析错误: {je}, 数据: {data_str[:100]}")
+                                                continue
+
+                                except UnicodeDecodeError as ue:
+                                    logger.warning(f"[API Server] 解码错误: {ue}")
                                     continue
+
+                        except asyncio.CancelledError:
+                            logger.info("[API Server] 流式响应被取消")
+                            raise
+                        except Exception as e:
+                            logger.error(f"[API Server] 流式响应处理错误: {e}")
+                            # 不抛出异常，继续处理
             
             # 处理流式响应
             async for chunk in call_llm_stream(messages):
                 yield chunk
             
-            # 完成处理
-            final_results = await tool_extractor.finish_processing()
-            if final_results:
-                for result in final_results:
-                    yield result
-            
-            # 检查是否需要继续流式输出（工具调用执行后）
-            # 这里可以添加逻辑来处理工具调用执行后的继续流式输出
-            # 例如：如果工具调用执行完成，可以继续调用LLM获取后续内容
+            # 处理完成
+
+            # V19: 如果请求返回音频，在这里生成并返回音频URL
+            if request.return_audio and complete_text:
+                try:
+                    logger.info(f"[API Server V19] 生成音频，文本长度: {len(complete_text)}")
+
+                    # 使用服务器端的TTS生成音频
+                    from voice.tts_wrapper import generate_speech_safe
+                    import tempfile
+                    import uuid
+
+                    # 生成音频文件
+                    tts_voice = config.voice_realtime.tts_voice or "zh-CN-XiaoyiNeural"
+                    audio_file = generate_speech_safe(
+                        text=complete_text,
+                        voice=tts_voice,
+                        response_format="mp3",
+                        speed=1.0
+                    )
+
+                    # 直接使用voice/output播放音频，不再返回给客户端
+                    try:
+                        from voice.output.voice_integration import get_voice_integration
+                        voice_integration = get_voice_integration()
+                        voice_integration.receive_audio_url(audio_file)
+                        logger.info(f"[API Server V19] 音频已直接播放: {audio_file}")
+                    except Exception as e:
+                        logger.error(f"[API Server V19] 音频播放失败: {e}")
+                        # 如果播放失败，仍然返回给客户端作为备选
+                        yield f"data: audio_url: {audio_file}\n\n"
+
+                except Exception as e:
+                    logger.error(f"[API Server V19] 音频生成失败: {e}")
+                    # traceback已经在文件顶部导入，直接使用
+                    print(f"[API Server V19] 详细错误信息:")
+                    traceback.print_exc()
+
+            # 完成流式文本切割器处理（非return_audio模式）
+            if tool_extractor and not request.return_audio:
+                try:
+                    await tool_extractor.finish_processing()
+                except Exception as e:
+                    print(f"流式文本切割器完成处理错误: {e}")
             
             # 完成语音处理
-            if voice_integration:
+            if voice_integration and not request.return_audio:  # V19: return_audio模式不需要这里的处理
                 try:
                     import threading
                     threading.Thread(
@@ -564,197 +578,71 @@ async def chat_stream(request: ChatRequest):
                     ).start()
                 except Exception as e:
                     print(f"语音集成完成处理错误: {e}")
+
+            # 流式处理完成后，获取完整文本用于保存
+            complete_response = ""
+            if tool_extractor:
+                try:
+                    # 获取完整文本内容
+                    complete_response = tool_extractor.get_complete_text()
+                except Exception as e:
+                    print(f"获取完整响应文本失败: {e}")
+            elif request.return_audio:
+                # V19: 如果是return_audio模式，使用累积的文本
+                complete_response = complete_text
+
+            # 统一保存对话历史与日志
+            _save_conversation_and_logs(session_id, request.message, complete_response)
             
-            # 保存对话历史到消息管理器（使用纯文本内容）
-            message_manager.add_message(session_id, "user", request.message)
-            message_manager.add_message(session_id, "assistant", pure_text_content[0])
             
-            # 保存成功的prompt日志
-            prompt_logger.log_prompt(session_id, messages, {"content": pure_text_content[0]}, api_status="success")
-            
+            # 异步触发后台意图分析 - 基于博弈论的背景分析机制
+            #_trigger_background_analysis(session_id)
+
             yield "data: [DONE]\n\n"
             
         except Exception as e:
             print(f"流式对话处理错误: {e}")
+            # 使用顶部导入的traceback
             traceback.print_exc()
             yield f"data: 错误: {str(e)}\n\n"
     
     return StreamingResponse(
         generate_response(),
-        media_type="text/plain",
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "Content-Type": "text/event-stream"
+            "Content-Type": "text/event-stream",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "X-Accel-Buffering": "no"  # 禁用nginx缓冲
         }
     )
 
-@app.post("/mcp/handoff")
-async def mcp_handoff(request: MCPRequest):
-    """MCP服务调用接口"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
-    
-    try:
-        # 获取或创建会话ID
-        session_id = message_manager.get_or_create_session(request.session_id)
-        
-        # 直接调用MCP handoff
-        result = await naga_agent.mcp.handoff(
-            service_name=request.service_name,
-            task=request.task
-        )
-        
-        return {
-            "status": "success",
-            "result": result,
-            "session_id": session_id  # 使用生成的会话ID
-        }
-    except Exception as e:
-        print(f"MCP handoff错误: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"handoff失败: {str(e)}")
-
-@app.get("/mcp/services")
-async def get_mcp_services():
-    """获取可用的MCP服务列表"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
-    
-    try:
-        # 使用动态服务池查询
-        services = naga_agent.mcp.get_available_services()
-        statistics = naga_agent.mcp.get_service_statistics()
-        
-        return {
-            "status": "success",
-            "services": services,
-            "statistics": statistics,
-            "count": len(services)
-        }
-    except Exception as e:
-        print(f"获取MCP服务列表错误: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"获取服务列表失败: {str(e)}")
-
-@app.get("/mcp/services/{service_name}")
-async def get_mcp_service_detail(service_name: str):
-    """获取指定MCP服务的详细信息"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
-    
-    try:
-        # 使用动态服务池查询
-        service_info = naga_agent.mcp.query_service_by_name(service_name)
-        if not service_info:
-            raise HTTPException(status_code=404, detail=f"服务 {service_name} 不存在")
-        
-        return {
-            "status": "success",
-            "service": service_info
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"获取MCP服务详情错误: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"获取服务详情失败: {str(e)}")
-
-@app.get("/mcp/services/search/{capability}")
-async def search_mcp_services(capability: str):
-    """根据能力关键词搜索MCP服务"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
-    
-    try:
-        # 使用动态服务池查询
-        matching_services = naga_agent.mcp.query_services_by_capability(capability)
-        
-        return {
-            "status": "success",
-            "capability": capability,
-            "services": matching_services,
-            "count": len(matching_services)
-        }
-    except Exception as e:
-        print(f"搜索MCP服务错误: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"搜索服务失败: {str(e)}")
-
-@app.get("/mcp/services/{service_name}/tools")
-async def get_mcp_service_tools(service_name: str):
-    """获取指定MCP服务的可用工具列表"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
-    
-    try:
-        # 使用动态服务池查询
-        tools = naga_agent.mcp.get_service_tools(service_name)
-        
-        return {
-            "status": "success",
-            "service_name": service_name,
-            "tools": tools,
-            "count": len(tools)
-        }
-    except Exception as e:
-        print(f"获取MCP服务工具列表错误: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"获取工具列表失败: {str(e)}")
-
-@app.get("/mcp/statistics")
-async def get_mcp_statistics():
-    """获取MCP服务统计信息"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
-    
-    try:
-        # 使用动态服务池查询
-        statistics = naga_agent.mcp.get_service_statistics()
-        
-        return {
-            "status": "success",
-            "statistics": statistics
-        }
-    except Exception as e:
-        print(f"获取MCP统计信息错误: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
-
-@app.post("/system/devmode")
-async def toggle_devmode():
-    """切换开发者模式"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
-    try:
-        naga_agent.dev_mode = not naga_agent.dev_mode
-        return {
-            "status": "success",
-            "dev_mode": naga_agent.dev_mode,
-            "message": f"开发者模式已{'启用' if naga_agent.dev_mode else '禁用'}"
-        }
-    except Exception as e:
-        print(f"切换开发者模式错误: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"切换开发者模式失败: {str(e)}")
 
 @app.get("/memory/stats")
 async def get_memory_stats():
     """获取记忆统计信息"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
     
     try:
-        if hasattr(naga_agent, 'memory_manager') and naga_agent.memory_manager:
-            stats = naga_agent.memory_manager.get_memory_stats()
+        # 记忆系统现在由main.py直接管理
+        try:
+            from summer_memory.memory_manager import memory_manager
+            if memory_manager and memory_manager.enabled:
+                stats = memory_manager.get_memory_stats()
+                return {
+                    "status": "success",
+                    "memory_stats": stats
+                }
+            else:
+                return {
+                    "status": "success",
+                    "memory_stats": {"enabled": False, "message": "记忆系统未启用"}
+                }
+        except ImportError:
             return {
                 "status": "success",
-                "memory_stats": stats
-            }
-        else:
-            return {
-                "status": "success",
-                "memory_stats": {"enabled": False, "message": "记忆系统未启用"}
+                "memory_stats": {"enabled": False, "message": "记忆系统模块未找到"}
             }
     except Exception as e:
         print(f"获取记忆统计错误: {e}")
@@ -887,8 +775,6 @@ async def upload_document(
 @app.post("/document/process")
 async def process_document(request: DocumentProcessRequest):
     """处理上传的文档"""
-    if not naga_agent:
-        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
     
     try:
         file_path = Path(request.file_path)
@@ -908,7 +794,15 @@ async def process_document(request: DocumentProcessRequest):
             }
             
             # 调用MCP服务
-            result = await naga_agent.mcp.handoff(mcp_request["service_name"], mcp_request["task"])
+            # MCP服务现在由mcpserver独立管理，通过HTTP调用
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "http://localhost:8003/schedule",
+                    json=mcp_request,
+                    timeout=30.0
+                )
+                result = response.json()
             
             if request.action == "read":
                 return {
@@ -921,7 +815,8 @@ async def process_document(request: DocumentProcessRequest):
             elif request.action == "analyze":
                 # 让NAGA分析文档内容
                 analysis_prompt = f"请分析以下文档内容，提供结构化的分析报告：\n\n{result}"
-                analysis_result = await naga_agent.get_response(analysis_prompt)
+                llm_service = get_llm_service()
+                analysis_result = await llm_service.get_response(analysis_prompt)
                 
                 return {
                     "status": "success",
@@ -933,7 +828,8 @@ async def process_document(request: DocumentProcessRequest):
             elif request.action == "summarize":
                 # 让NAGA总结文档内容
                 summary_prompt = f"请总结以下文档内容，提供简洁的摘要：\n\n{result}"
-                summary_result = await naga_agent.get_response(summary_prompt)
+                llm_service = get_llm_service()
+                summary_result = await llm_service.get_response(summary_prompt)
                 
                 return {
                     "status": "success",
@@ -957,7 +853,8 @@ async def process_document(request: DocumentProcessRequest):
                 }
             elif request.action == "analyze":
                 analysis_prompt = f"请分析以下文档内容，提供结构化的分析报告：\n\n{content}"
-                analysis_result = await naga_agent.get_response(analysis_prompt)
+                llm_service = get_llm_service()
+                analysis_result = await llm_service.get_response(analysis_prompt)
                 
                 return {
                     "status": "success",
@@ -968,7 +865,8 @@ async def process_document(request: DocumentProcessRequest):
                 }
             elif request.action == "summarize":
                 summary_prompt = f"请总结以下文档内容，提供简洁的摘要：\n\n{content}"
-                summary_result = await naga_agent.get_response(summary_prompt)
+                llm_service = get_llm_service()
+                summary_result = await llm_service.get_response(summary_prompt)
                 
                 return {
                     "status": "success",
@@ -1052,27 +950,3 @@ async def load_log_context(days: int = 3, max_messages: int = None):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"加载上下文失败: {str(e)}")
 
-if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="NagaAgent API服务器")
-    parser.add_argument("--host", default="127.0.0.1", help="服务器主机地址")
-    parser.add_argument("--port", type=int, default=8000, help="服务器端口")
-    parser.add_argument("--reload", action="store_true", help="开启自动重载")
-    
-    args = parser.parse_args()
-    
-    print(f"🚀 启动NagaAgent API服务器...")
-    print(f"📍 地址: http://{args.host}:{args.port}")
-    print(f"📚 文档: http://{args.host}:{args.port}/docs")
-    print(f"🔄 自动重载: {'开启' if args.reload else '关闭'}")
-    
-    uvicorn.run(
-        "api_server:app",
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
-        log_level="info",
-        ws_ping_interval=None,
-        ws_ping_timeout=None
-    ) 

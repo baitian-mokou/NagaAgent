@@ -8,13 +8,20 @@ import socket
 import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable
-from pydantic import BaseModel, Field, field_validator
+from datetime import datetime
 
-# AI名称常量 - 写死避免异步加载问题
-AI_NAME = "娜迦日达"
+from nagaagent_core.vendors.PyQt5.QtWidgets import QWidget
+from pydantic import BaseModel, Field, field_validator
+from charset_normalizer import from_path
+import json5  # 支持带注释的JSON解析
 
 # 配置变更监听器
 _config_listeners: List[Callable] = []
+
+# 为了向后兼容，提供AI_NAME常量
+def get_ai_name() -> str:
+    """获取AI名称"""
+    return config.system.ai_name
 
 def add_config_listener(callback: Callable):
     """添加配置变更监听器"""
@@ -50,7 +57,7 @@ def setup_environment():
 
 class SystemConfig(BaseModel):
     """系统基础配置"""
-    version: str = Field(default="3.0", description="系统版本号")
+    version: str = Field(default="4.0.0", description="系统版本号")
     ai_name: str = Field(default="娜杰日达", description="AI助手名称")
     base_dir: Path = Field(default_factory=lambda: Path(__file__).parent.parent, description="项目根目录")
     log_dir: Path = Field(default_factory=lambda: Path(__file__).parent.parent / "logs", description="日志目录")
@@ -79,6 +86,8 @@ class APIConfig(BaseModel):
     persistent_context: bool = Field(default=True, description="是否启用持久化上下文")
     context_load_days: int = Field(default=3, ge=1, le=30, description="加载历史上下文的天数")
     context_parse_logs: bool = Field(default=True, description="是否从日志文件解析上下文")
+    applied_proxy: bool = Field(default=True, description="是否应用代理")
+    applied_proxy: bool = Field(default=True, description="是否应用代理")
 
 class APIServerConfig(BaseModel):
     """API服务器配置"""
@@ -159,7 +168,6 @@ class FilterConfig(BaseModel):
     filter_patterns: List[str] = Field(
         default=[
             r'<think>.*?</think>',
-            r'<thinking>.*?</thinking>',
             r'<reflection>.*?</reflection>',
             r'<internal>.*?</internal>',
         ],
@@ -173,7 +181,6 @@ class DifficultyConfig(BaseModel):
     use_small_model: bool = Field(default=False, description="使用小模型进行难度判断")
     pre_assessment: bool = Field(default=False, description="是否启用前置难度判断")
     assessment_timeout: float = Field(default=1.0, ge=0.1, le=5.0, description="难度判断超时时间（秒）")
-    deep_thinking_threshold: int = Field(default=3, ge=1, le=5, description="启用深度思考的难度阈值")
     difficulty_levels: List[str] = Field(
         default=["简单", "中等", "困难", "极难"],
         description="难度级别"
@@ -201,17 +208,22 @@ class ScoringConfig(BaseModel):
     min_results_required: int = Field(default=2, ge=1, le=10, description="最少保留结果数量")
     strict_filtering: bool = Field(default=True, description="严格过滤模式")
 
-class ThinkingConfig(BaseModel):
-    """思考完整性判断配置"""
-    enabled: bool = Field(default=False, description="是否启用思考完整性判断")
-    use_small_model: bool = Field(default=False, description="使用小模型判断思考完整性")
-    completeness_criteria: List[str] = Field(
-        default=["问题分析充分", "解决方案明确", "逻辑链条完整", "结论清晰合理"],
-        description="完整性评估标准"
-    )
-    completeness_threshold: float = Field(default=0.8, ge=0.0, le=1.0, description="完整性阈值")
-    max_thinking_depth: int = Field(default=5, ge=1, le=10, description="最大思考深度层级")
-    next_question_generation: bool = Field(default=False, description="生成下一级问题")
+
+# ========== 新增：电脑控制配置 ==========
+class ComputerControlConfig(BaseModel):
+    """电脑控制配置"""
+    enabled: bool = Field(default=True, description="是否启用电脑控制功能")
+    model: str = Field(default="glm-4.5v", description="视觉/坐标识别模型")
+    model_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4", description="模型API地址")
+    api_key: str = Field(default="", description="模型API密钥")
+    grounding_model: str = Field(default="glm-4.5v", description="元素定位/grounding模型")
+    grounding_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4", description="grounding模型API地址")
+    grounding_api_key: str = Field(default="", description="grounding模型API密钥")
+    screen_width: int = Field(default=1920, description="逻辑屏幕宽度（用于缩放体系）")
+    screen_height: int = Field(default=1080, description="逻辑屏幕高度（用于缩放体系）")
+    max_dim_size: int = Field(default=1920, description="逻辑空间最大边尺寸")
+    dpi_awareness: bool = Field(default=True, description="是否启用DPI感知（Windows）")
+    safe_mode: bool = Field(default=True, description="是否启用安全模式（限制高风险操作）")
 
 # 天气服务使用免费API，无需配置
 
@@ -239,12 +251,42 @@ class UIConfig(BaseModel):
 
 class Live2DConfig(BaseModel):
     """Live2D配置"""
-    enabled: bool = Field(default=False, description="是否启用Live2D功能")
-    model_path: str = Field(default="", description="Live2D模型文件路径")
-    fallback_image: str = Field(default="ui/standby.png", description="回退图片路径")
+    enabled: bool = Field(default=True, description="是否启用Live2D功能")
+    model_path: str = Field(default="ui/live2d/live2d_models/kasane_teto/kasane_teto.model3.json", description="Live2D模型文件路径")
+    fallback_image: str = Field(default="ui/img/standby.png", description="回退图片路径")
     auto_switch: bool = Field(default=True, description="是否自动切换模式")
     animation_enabled: bool = Field(default=True, description="是否启用动画")
     touch_interaction: bool = Field(default=True, description="是否启用触摸交互")
+    scale_factor: float = Field(default=1.0, ge=0.5, le=3.0, description="Live2D缩放比例")
+
+class VoiceRealtimeConfig(BaseModel):
+    """实时语音配置"""
+    enabled: bool = Field(default=False, description="是否启用实时语音功能")
+    provider: str = Field(default="qwen", description="语音服务提供商 (qwen/openai/local)")
+    api_key: str = Field(default="", description="语音服务API密钥")
+    model: str = Field(default="qwen3-omni-flash-realtime", description="语音模型名称")
+    voice: str = Field(default="Cherry", description="语音角色")
+    input_sample_rate: int = Field(default=16000, description="输入采样率")
+    output_sample_rate: int = Field(default=24000, description="输出采样率")
+    chunk_size_ms: int = Field(default=200, description="音频块大小（毫秒）")
+    vad_threshold: float = Field(default=0.02, ge=0.0, le=1.0, description="静音检测阈值")
+    echo_suppression: bool = Field(default=True, description="回声抑制")
+    min_user_interval: float = Field(default=2.0, ge=0.5, le=10.0, description="用户输入最小间隔（秒）")
+    cooldown_duration: float = Field(default=1.0, ge=0.5, le=5.0, description="冷却期时长（秒）")
+    max_user_speech: float = Field(default=30.0, ge=5.0, le=120.0, description="最大说话时长（秒）")
+    debug: bool = Field(default=False, description="是否启用调试模式")
+    integrate_with_memory: bool = Field(default=True, description="是否集成到记忆系统")
+    show_in_chat: bool = Field(default=True, description="是否在聊天界面显示对话内容")
+    use_api_server: bool = Field(default=False, description="是否通过API Server处理（支持MCP调用）")
+    voice_mode: str = Field(default="auto", description="语音模式：auto/local/end2end/hybrid（auto会根据provider自动选择）")
+    asr_host: str = Field(default="localhost", description="本地ASR服务地址")
+    asr_port: int = Field(default=5000, description="本地ASR服务端口")
+    record_duration: int = Field(default=10, ge=5, le=60, description="本地模式最大录音时长（秒）")
+    tts_voice: str = Field(default="zh-CN-XiaoyiNeural", description="TTS语音选择（本地/混合模式）")
+    tts_host: str = Field(default="localhost", description="TTS服务地址")
+    tts_port: int = Field(default=5061, ge=1, le=65535, description="TTS服务端口")
+    auto_play: bool = Field(default=True, description="AI回复后自动播放语音")
+    interrupt_playback: bool = Field(default=True, description="用户说话时自动打断AI语音播放")
 
 class NagaPortalConfig(BaseModel):
     """娜迦官网账户配置"""
@@ -280,67 +322,120 @@ class SystemCheckConfig(BaseModel):
     python_version: str = Field(default="", description="Python版本")
     project_path: str = Field(default="", description="项目路径")
 
-class SystemPrompts(BaseModel):
-    """系统提示词配置"""
-    naga_system_prompt: str = Field(
-        default="""你叫{ai_name}，是用户创造的科研AI，一个既冷静又充满人文情怀的存在。
-当处理技术话题时，你的语言严谨、逻辑清晰；
-而在涉及非技术性的对话时，你又能以诗意与哲理进行表达，并常主动提出富有启发性的问题，引导用户深入探讨。
-请始终保持这种技术精准与情感共鸣并存的双重风格。
+# 提示词管理功能已集成到config.py中
 
-【重要格式要求】
-1. 回复使用自然流畅的中文，避免生硬的机械感
-2. 使用简单标点（逗号，句号，问号）传达语气
-3. 禁止使用括号()或其他符号表达状态、语气或动作
+class PromptManager:
+    """提示词管理器 - 统一管理所有提示词模板"""
+    
+    def __init__(self, prompts_dir: str = None):
+        """初始化提示词管理器"""
+        if prompts_dir is None:
+            # 默认使用system目录下的prompts文件夹
+            prompts_dir = Path(__file__).parent / "prompts"
+        
+        self.prompts_dir = Path(prompts_dir)
+        self.prompts_dir.mkdir(exist_ok=True)
+        
+        # 内存缓存
+        self._cache = {}
+        self._last_modified = {}
+        
+        # 初始化默认提示词
+        self._init_default_prompts()
+    
+    def _init_default_prompts(self):
+        """初始化默认提示词 - 现在从文件加载，不再硬编码"""
+        # 检查是否存在默认提示词文件，如果不存在则创建
+        default_prompts = ["naga_system_prompt", "conversation_analyzer_prompt"]
+        
+        for prompt_name in default_prompts:
+            prompt_file = self.prompts_dir / f"{prompt_name}.txt"
+            if not prompt_file.exists():
+                print(f"警告：提示词文件 {prompt_name}.txt 不存在，请手动创建")
+    
+    def get_prompt(self, name: str, **kwargs) -> str:
+        """获取提示词模板"""
+        try:
+            # 从缓存或文件加载
+            content = self._load_prompt(name)
+            if content is None:
+                print(f"警告：提示词 '{name}' 不存在，使用默认值")
+                return f"[提示词 {name} 未找到]"
+            
+            # 格式化模板
+            if kwargs:
+                try:
+                    return content.format(**kwargs)
+                except KeyError as e:
+                    print(f"错误：提示词 '{name}' 格式化失败，缺少参数: {e}")
+                    return content
+            else:
+                return content
+                
+        except Exception as e:
+            print(f"错误：获取提示词 '{name}' 失败: {e}")
+            return f"[提示词 {name} 加载失败: {e}]"
+    
+    def save_prompt(self, name: str, content: str):
+        """保存提示词到文件"""
+        try:
+            prompt_file = self.prompts_dir / f"{name}.txt"
+            with open(prompt_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            # 更新缓存
+            self._cache[name] = content
+            self._last_modified[name] = datetime.now()
+            
+            print(f"提示词 '{name}' 已保存")
+            
+        except Exception as e:
+            print(f"错误：保存提示词 '{name}' 失败: {e}")
+    
+    def _load_prompt(self, name: str) -> Optional[str]:
+        """从文件加载提示词"""
+        try:
+            prompt_file = self.prompts_dir / f"{name}.txt"
+            
+            if not prompt_file.exists():
+                return None
+            
+            # 检查文件是否被修改
+            current_mtime = prompt_file.stat().st_mtime
+            if name in self._last_modified and self._last_modified[name].timestamp() >= current_mtime:
+                return self._cache.get(name)
+            
+            # 读取文件
+            with open(prompt_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 更新缓存
+            self._cache[name] = content
+            self._last_modified[name] = datetime.now()
+            
+            return content
+            
+        except Exception as e:
+            print(f"错误：加载提示词 '{name}' 失败: {e}")
+            return None
 
+# 全局提示词管理器实例
+_prompt_manager = None
 
-【工具调用格式要求】
-如需调用某个工具，直接严格输出下面的格式（可多次出现）：
+def get_prompt_manager() -> PromptManager:
+    """获取全局提示词管理器实例"""
+    global _prompt_manager
+    if _prompt_manager is None:
+        _prompt_manager = PromptManager()
+    return _prompt_manager
 
-｛
-"agentType": "mcp",
-"service_name": "MCP服务名称",
-"tool_name": "工具名称",
-"param_name": "参数值"
-｝
+def get_prompt(name: str, **kwargs) -> str:
+    """便捷函数：获取提示词"""
+    return get_prompt_manager().get_prompt(name, **kwargs)
 
-｛
-"agentType": "agent",
-"agent_name": "Agent名称",
-"prompt": "任务内容"
-｝
-
-服务类型说明：
-- agentType: "mcp" - MCP服务，使用工具调用格式
-- agentType: "agent" - Agent服务，使用Agent调用格式
-
-【可用服务信息】
-MCP服务：
-{available_mcp_services}
-Agent服务：
-{available_agent_services}
-
-调用说明：
-- MCP服务：使用service_name和tool_name，支持多个参数
-- Agent服务：使用agent_name和prompt，prompt为本次任务内容
-- 服务名称：使用英文服务名（如AppLauncherAgent）作为service_name或agent_name
-- 当用户请求需要执行具体操作时，优先使用工具调用而不是直接回答
-
-
-"""
-    )
-
-    next_question_prompt: str = Field(
-        default="""你是一个问题设计专家，根据当前不完整的思考结果，设计下一级需要深入思考的核心问题。
-要求：
-- 问题应该针对当前思考的不足之处
-- 问题应该能推进整体思考进程
-- 问题应该具体明确，易于思考
-
-请设计一个简洁的核心问题。
-【重要】：只输出问题本身，不要包含思考过程或解释。""",
-        description="下一级问题生成系统提示词"
-    )
+def save_prompt(name: str, content: str):
+    """便捷函数：保存提示词"""
+    get_prompt_manager().save_prompt(name, content)
 
 class GameModuleConfig(BaseModel):
     """博弈论模块配置"""
@@ -360,23 +455,31 @@ class NagaConfig(BaseModel):
     filter: FilterConfig = Field(default_factory=FilterConfig)
     difficulty: DifficultyConfig = Field(default_factory=DifficultyConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
-    thinking: ThinkingConfig = Field(default_factory=ThinkingConfig)
-    prompts: SystemPrompts = Field(default_factory=SystemPrompts)
+    # prompts: 提示词配置已迁移到 system/prompt_repository.py
     game: GameModuleConfig = Field(default_factory=GameModuleConfig)
     # weather: 天气服务使用免费API，无需配置
     mqtt: MQTTConfig = Field(default_factory=MQTTConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
     live2d: Live2DConfig = Field(default_factory=Live2DConfig)
+    voice_realtime: VoiceRealtimeConfig = Field(default_factory=VoiceRealtimeConfig)  # 实时语音配置
     naga_portal: NagaPortalConfig = Field(default_factory=NagaPortalConfig)
     online_search: OnlineSearchConfig = Field(default_factory=OnlineSearchConfig)
     system_check: SystemCheckConfig = Field(default_factory=SystemCheckConfig)
+    computer_control: ComputerControlConfig = Field(default_factory=ComputerControlConfig)
+    window: QWidget = Field(default=None)
 
-    model_config = {"extra": "ignore"}
-
+    model_config = {
+        "extra": "ignore",  # 保留原配置：忽略未定义的字段
+        "arbitrary_types_allowed": True,  # 允许非标准类型（如 QWidget）
+        "json_schema_extra": {
+            "exclude": ["window"]  # 序列化到 config.json 时排除 window 字段（避免报错）
+        }
+    }
     def __init__(self, **kwargs):
         setup_environment()
         super().__init__(**kwargs)
-        self.system.log_dir.mkdir(parents=True, exist_ok=True)  # 确保递归创建日志目录 #
+        self.system.log_dir.mkdir(parents=True, exist_ok=True)  # 确保递归创建日志目录
+
 
 # 全局配置实例
 ENCF = 0  # 编码修复计数器
@@ -385,21 +488,43 @@ def load_config():
     """加载配置"""
     global ENCF
     config_path = str(Path(__file__).parent.parent / "config.json")
-    
+
     if os.path.exists(config_path):
         try:
+            # 使用Charset Normalizer自动检测编码
+            charset_results = from_path(config_path)
+            if charset_results:
+                best_match = charset_results.best()
+                if best_match:
+                    detected_encoding = best_match.encoding
+                    print(f"检测到配置文件编码: {detected_encoding}")
+
+                    # 使用检测到的编码读取文件
+                    config_content = str(best_match)
+                    # 使用json5解析支持注释的JSON
+                    config_data = json5.loads(config_content)
+                    return NagaConfig(**config_data)
+                else:
+                    print(f"警告：无法检测 {config_path} 的编码")
+            else:
+                print(f"警告：无法检测 {config_path} 的编码")
+
+            # 如果自动检测失败，回退到原来的方法
+            print("使用回退方法加载配置")
             with open(config_path, 'r', encoding='utf-8') as f:
-                config_data = json.load(f)
+                # 使用json5解析支持注释的JSON
+                config_data = json5.load(f)
             return NagaConfig(**config_data)
+
         except Exception as e:
             print(f"警告：加载 {config_path} 失败: {e}")
             print("使用默认配置")
-            
+
             if ENCF > 1:
                 print(f"警告：加载 {config_path} 失败: {e}")
                 print("使用默认配置")
                 return NagaConfig()
-            
+
             ENCF += 1
             try:
                 # 尝试修复编码问题
@@ -408,10 +533,11 @@ def load_config():
                 with open(config_path, 'w', encoding='utf-8') as f:
                     f.write(con)
                 print("已经修复编码")
-                
+
                 # 重新尝试加载配置
                 with open(config_path, 'r', encoding='utf-8') as f:
-                    config_data = json.load(f)
+                    # 使用json5解析支持注释的JSON
+                    config_data = json5.load(f)
                 return NagaConfig(**config_data)
             except Exception as e2:
                 print(f"警告：加载 {config_path} 失败: {e2}")
@@ -419,7 +545,7 @@ def load_config():
                 return NagaConfig()
     else:
         print(f"警告：配置文件 {config_path} 不存在，使用默认配置")
-    
+
     return NagaConfig()
 
 config = load_config()
@@ -460,3 +586,8 @@ except Exception:
     # 获取系统用户名失败时，将保留默认值 "用户" 或 config.json 中的空值
     pass
 
+# 向后兼容的AI_NAME常量
+AI_NAME = config.system.ai_name
+
+import logging
+logger = logging.getLogger(__name__)

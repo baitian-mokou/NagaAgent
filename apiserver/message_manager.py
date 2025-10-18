@@ -9,11 +9,40 @@ import uuid
 import logging
 import re
 import json
+import sys
+import time
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# 工具函数
+def now():
+    """获取当前时间戳"""
+    return time.strftime('%H:%M:%S:') + str(int(time.time() * 1000) % 10000)
+
+def setup_logging():
+    """统一配置日志系统"""
+    try:
+        from system.config import config
+        log_level = getattr(logging, config.system.log_level.upper(), logging.INFO)
+        logging.basicConfig(
+            level=log_level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[logging.StreamHandler(sys.stderr)]
+        )
+        
+        # 设置第三方库日志级别
+        for logger_name in ["httpcore.connection", "httpcore.http11", "httpx", "openai._base_client", "asyncio"]:
+            logging.getLogger(logger_name).setLevel(logging.WARNING)
+    except ImportError:
+        # 如果无法导入配置，使用默认设置
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[logging.StreamHandler(sys.stderr)]
+        )
 
 class MessageManager:
     """统一的消息管理器"""
@@ -118,8 +147,14 @@ class MessageManager:
         """构建完整的对话消息列表"""
         messages = []
         
+        # 添加当前时间信息到系统提示词
+        from datetime import datetime
+        current_time = datetime.now()
+        time_info = f"\n\n【当前时间信息】\n当前日期：{current_time.strftime('%Y年%m月%d日')}\n当前时间：{current_time.strftime('%H:%M:%S')}\n当前星期：{current_time.strftime('%A')}\n"
+        enhanced_system_prompt = system_prompt + time_info
+        
         # 添加系统提示词
-        messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "system", "content": enhanced_system_prompt})
         
         # 添加历史对话
         if include_history:
@@ -147,8 +182,14 @@ class MessageManager:
         """
         messages = []
         
+        # 添加当前时间信息到系统提示词
+        from datetime import datetime
+        current_time = datetime.now()
+        time_info = f"\n\n【当前时间信息】\n当前日期：{current_time.strftime('%Y年%m月%d日')}\n当前时间：{current_time.strftime('%H:%M:%S')}\n当前星期：{current_time.strftime('%A')}\n"
+        enhanced_system_prompt = system_prompt + time_info
+        
         # 添加系统提示词
-        messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "system", "content": enhanced_system_prompt})
         
         # 计算最大消息数量
         if max_history_rounds is None:
@@ -459,6 +500,45 @@ class MessageManager:
             "assistant_messages": assistant_messages,
             "days_covered": days
         }
+    
+    def save_conversation_log(self, user_message: str, assistant_message: str, dev_mode: bool = False):
+        """
+        保存对话日志到文件
+        
+        Args:
+            user_message: 用户消息
+            assistant_message: 助手回复
+            dev_mode: 是否为开发者模式（开发者模式不保存日志）
+        """
+        if dev_mode:
+            return  # 开发者模式不写日志
+        
+        try:
+            from datetime import datetime
+            import os
+            
+            # 获取当前时间
+            now = datetime.now()
+            date_str = now.strftime('%Y-%m-%d')
+            time_str = now.strftime('%H:%M:%S')
+            
+            # 确保日志目录存在
+            log_dir = str(self.log_dir)
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir, exist_ok=True)
+                logger.info(f"已创建日志目录: {log_dir}")
+            
+            # 保存对话日志
+            log_file = os.path.join(log_dir, f"{date_str}.log")
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"[{time_str}] 用户: {user_message}\n")
+                f.write(f"[{time_str}] {self.ai_name}: {assistant_message}\n")
+                f.write("-" * 50 + "\n")
+            
+            logger.debug(f"已保存对话日志到: {log_file}")
+            
+        except Exception as e:
+            logger.error(f"保存对话日志失败: {e}")
 
 # 全局消息管理器实例
 message_manager = MessageManager() 
