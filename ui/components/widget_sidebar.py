@@ -145,10 +145,10 @@ class SidebarWidget(QWidget):
 
         # 项目配置
         self.items_config = [
-            ("ui/img/icons/naga_chat.png", "娜迦对话"),
+            ("ui/img/icons/naga_chat.png", "对话"),
             ("ui/img/icons/mind_map.png", "心智云图"),
-            ("ui/img/icons/personality_game.png", "性格博弈"),
-            ("ui/img/icons/love_adventure.png", "恋爱冒险")
+            ("ui/img/icons/personality_game.png", "博弈图"),
+            ("ui/img/icons/love_adventure.png", "游戏拓展")
         ]
 
         #self._prepare_icons()

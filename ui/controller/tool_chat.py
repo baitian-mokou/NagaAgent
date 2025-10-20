@@ -1,11 +1,11 @@
 from nagaagent_core.vendors.PyQt5.QtWidgets import QLabel
 from ..utils.response_util import extract_message
 from ui.utils.message_renderer import MessageRenderer
+from ui.utils.simple_http_client import SimpleHttpClient, SimpleBatchClient
 from system.config import config, AI_NAME, logger
 from nagaagent_core.vendors.PyQt5.QtCore import QThread, QCoreApplication, Qt, QTimer, QMetaObject
 import time
 from typing import Dict, Optional
-from ..utils.stream_util import _StreamHttpWorker, _NonStreamHttpWorker
 
 
 class ChatTool():
@@ -40,8 +40,8 @@ class ChatTool():
         self.non_stream_message_id = None
 
         self.current_ai_voice_message_id = None
-        # Worker管理
-        self.worker: Optional[_StreamHttpWorker] = None
+        # HTTP客户端管理
+        self.http_client = None
 
         # 工具调用状态
         self.in_tool_call_mode = False
@@ -152,47 +152,41 @@ class ChatTool():
         self.current_message_id = self.current_ai_voice_message_id = None
         self.current_response = ""
 
-        # 终止运行中的worker
-        if self.worker and self.worker.isRunning():
+        # 终止运行中的HTTP客户端
+        if self.http_client and self.http_client.isRunning():
             self.cancel_current_task()
-            self.worker.deleteLater()
-            self.worker = None
+            self.http_client.deleteLater()
+            self.http_client = None
 
     def _send_self_game_request(self, user_input):
         """博弈论模式（非流式）请求"""
         api_url = f"http://{config.api_server.host}:{config.api_server.port}/chat"
         data = self._build_request_data(user_input, stream=False, use_self_game=True)
 
-        self.worker = _NonStreamHttpWorker(api_url, data)
-        self._bind_non_stream_worker_signals(self.worker, "博弈论")
+        self.http_client = SimpleBatchClient(api_url, data)
+        self._bind_batch_client_signals(self.http_client, "博弈论")
         self.progress_widget.set_thinking_mode()
-        self.worker.start()
+        self.http_client.start()
 
     def _send_stream_request(self, user_input):
         """普通流式请求"""
         api_url = f"http://{config.api_server.host}:{config.api_server.port}/chat/stream"
         data = self._build_request_data(user_input, stream=True, use_self_game=False)
 
-        self.worker = _StreamHttpWorker(api_url, data)
-        self.worker.status.connect(lambda st: self.progress_widget.status_label.setText(st))
-        self.worker.error.connect(lambda err: (
-            self.progress_widget.stop_loading(),
-            self.add_user_message("系统", f"❌ 流式调用错误: {err}")
-        ))
-        self.worker.chunk.connect(lambda data_str: self._handle_stream_chunk(data_str))
-        self.worker.done.connect(self.finalize_streaming_response)
+        self.http_client = SimpleHttpClient(api_url, data)
+        self._bind_stream_client_signals(self.http_client)
         self.progress_widget.set_thinking_mode()
-        self.worker.start()
+        self.http_client.start()
 
     def _send_non_stream_request(self, user_input):
         """普通非流式请求"""
         api_url = f"http://{config.api_server.host}:{config.api_server.port}/chat"
         data = self._build_request_data(user_input, stream=False, use_self_game=False)
 
-        self.worker = _NonStreamHttpWorker(api_url, data)
-        self._bind_non_stream_worker_signals(self.worker, "非流式")
+        self.http_client = SimpleBatchClient(api_url, data)
+        self._bind_batch_client_signals(self.http_client, "非流式")
         self.progress_widget.set_thinking_mode()
-        self.worker.start()
+        self.http_client.start()
 
     # 保留必要的工具方法（未过度拆分）
     def _build_request_data(self, user_input, stream, use_self_game):
@@ -203,34 +197,32 @@ class ChatTool():
             data["return_audio"] = True
         return data
 
-    def _bind_non_stream_worker_signals(self, worker, error_prefix):
-        """绑定非流式worker的信号（复用逻辑）"""
-        worker.status.connect(lambda st: self.progress_widget.status_label.setText(st))
-        worker.error.connect(lambda err: (
+    def _bind_batch_client_signals(self, client, error_prefix):
+        """绑定批量HTTP客户端的信号"""
+        client.status_changed.connect(lambda st: self.progress_widget.status_label.setText(st))
+        client.error_occurred.connect(lambda err: (
             self.progress_widget.stop_loading(),
             self.add_user_message("系统", f"❌ {error_prefix}调用错误: {err}")
         ))
-        worker.finished_text.connect(lambda text: (
+        client.response_received.connect(lambda text: (
             self.progress_widget.stop_loading(),
             self.start_non_stream_typewriter(text)
         ))
+        
+    def _bind_stream_client_signals(self, client):
+        """绑定流式HTTP客户端的信号"""
+        client.status_changed.connect(lambda st: self.progress_widget.status_label.setText(st))
+        client.error_occurred.connect(lambda err: (
+            self.progress_widget.stop_loading(),
+            self.add_user_message("系统", f"❌ 流式调用错误: {err}")
+        ))
+        client.chunk_received.connect(self._handle_stream_chunk)
+        client.response_complete.connect(self.finalize_streaming_response)
 
-    def _handle_stream_chunk(self, data_str):
-        """处理流式响应片段"""
-        try:
-            import base64
-            # 1. base64 → bytes
-            raw = base64.b64decode(data_str, validate=True)
-            # 2. bytes → str（默认 utf-8，出错就忽略）
-            text = raw.decode('utf-8', errors='ignore')
-        except Exception:
-            # 如果这一包不是完整 base64，直接原样丢给 UI，防止断帧
-            text = data_str
-
+    def _handle_stream_chunk(self, text):
+        """处理流式响应片段（文本已经由HTTP客户端解码）"""
         if text.startswith(('session_id: ', 'audio_url: ')):
             return
-
-
         self.append_response_chunk(text)
 
     def add_system_message(self, content: str) -> str:
@@ -524,56 +516,6 @@ class ChatTool():
     # 流式响应处理
     # ------------------------------
 
-    def handle_streaming_response(self, resp):
-        """处理流式响应"""
-        try:
-            # 启动进度显示
-            self.progress_widget.set_thinking_mode()
-
-            # 累积响应内容
-            response_content = ""
-            message_started = False
-
-            # 打字机效果相关
-            self.stream_typewriter_buffer = ""
-            self.stream_typewriter_index = 0
-
-            # 处理流式数据
-            for line in resp.iter_lines():
-                if line:
-                    # 使用UTF-8解码，忽略错误字符
-                    line_str = line.decode('utf-8', errors='ignore')
-                    if line_str.startswith('data: '):
-                        data_str = line_str[6:]
-                        if data_str == '[DONE]':
-                            break
-                        elif data_str.startswith('session_id: '):
-                            # 处理会话ID
-                            session_id = data_str[12:]
-                            logger.debug(f"会话ID: {session_id}")
-                        elif data_str.startswith('audio_url: '):
-                            # 音频URL由apiserver直接处理
-                            pass
-                        else:
-                            # 处理内容数据
-                            response_content += data_str
-                            self.stream_typewriter_buffer += data_str
-
-                            # 如果是第一条消息，创建新消息并设置当前消息ID
-                            if not message_started:
-                                self.current_message_id = self.add_ai_message("")
-                                message_started = True
-                                # 启动流式打字机效果
-                                self._start_stream_typewriter()
-
-            # 完成处理 - 停止打字机，显示完整内容
-            self._stop_stream_typewriter()
-            self.update_last_message(response_content)
-            self.progress_widget.stop_loading()
-
-        except Exception as e:
-            self.add_system_message(f"❌ 流式处理错误: {str(e)}")
-            self.progress_widget.stop_loading()
 
     def append_response_chunk(self, chunk: str):
         """追加响应片段（流式模式）- 实时显示到消息框"""
@@ -710,41 +652,6 @@ class ChatTool():
         # 更新消息显示
         self.update_last_message(displayed_text)
 
-    # ------------------------------
-    # Worker管理
-    # ------------------------------
-
-    def setup_streaming_worker(self, worker: _StreamHttpWorker):
-        """配置流式Worker的信号连接"""
-        self.worker = worker
-        worker.status.connect(lambda st: self.progress_widget.status_label.setText(st))
-        worker.error.connect(lambda err: (
-            self.progress_widget.stop_loading(),
-            self.add_system_message(f"❌ 流式调用错误: {err}")
-        ))
-        worker.chunk.connect(self.append_response_chunk)
-        worker.done.connect(self.finalize_streaming_response)
-        worker.finished.connect(self._on_worker_finished)
-
-    def setup_batch_worker(self, worker: _NonStreamHttpWorker):
-        """配置批量Worker的信号连接"""
-        self.worker = worker
-        worker.status.connect(lambda st: self.progress_widget.status_label.setText(st))
-        worker.error.connect(lambda err: (
-            self.progress_widget.stop_loading(),
-            self.add_system_message(f"❌ 批量调用错误: {err}")
-        ))
-
-        def on_finish_text(text):
-            self.progress_widget.stop_loading()
-            self.start_non_stream_typewriter(text)
-
-        worker.finished_text.connect(on_finish_text)
-        worker.finished.connect(self._on_worker_finished)
-
-    def _on_worker_finished(self):
-        """Worker完成后的清理工作"""
-        self.worker = None
 
     def cancel_current_task(self):
         """取消当前任务"""
@@ -761,10 +668,10 @@ class ChatTool():
             self.non_stream_index = None
             self.non_stream_message_id = None
 
-        # 处理worker
-        if self.worker and self.worker.isRunning():
+        # 处理HTTP客户端
+        if self.http_client and self.http_client.isRunning():
             # 立即设置取消标志
-            self.worker.cancel()
+            self.http_client.cancel()
 
             # 非阻塞方式处理线程清理
             self.progress_widget.stop_loading()
@@ -775,19 +682,19 @@ class ChatTool():
             self.current_message_id = None
 
             # 使用QTimer延迟处理线程清理，避免UI卡顿
-            QTimer.singleShot(50, self._cleanup_worker)
+            QTimer.singleShot(50, self._cleanup_http_client)
         else:
             self.progress_widget.stop_loading()
 
-    def _cleanup_worker(self):
-        """清理Worker资源"""
-        if self.worker:
-            self.worker.quit()
-            if not self.worker.wait(500):  # 只等待500ms
-                self.worker.terminate()
-                self.worker.wait(200)  # 再等待200ms
-            self.worker.deleteLater()
-            self.worker = None
+    def _cleanup_http_client(self):
+        """清理HTTP客户端资源"""
+        if self.http_client:
+            self.http_client.quit()
+            if not self.http_client.wait(500):  # 只等待500ms
+                self.http_client.terminate()
+                self.http_client.wait(200)  # 再等待200ms
+            self.http_client.deleteLater()
+            self.http_client = None
 
     # ------------------------------
     # 属性访问器
